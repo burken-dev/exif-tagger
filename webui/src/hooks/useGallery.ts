@@ -327,13 +327,17 @@ export function useGallery() {
   );
 
   // Fetch image detail (for modal)
-  const fetchImageDetail = useCallback(async (imageId: number | null) => {
-    if (imageId === null) {
+  const fetchImageDetail = useCallback(async (imageOrId: number | GalleryImage | null) => {
+    if (imageOrId === null) {
       setSelectedImageDetail(null);
       return;
     }
+    if (typeof imageOrId === 'object') {
+      setSelectedImageDetail(imageOrId);
+      return;
+    }
     try {
-      const resp = await fetch(`/api/gallery/image/${imageId}`);
+      const resp = await fetch(`/api/gallery/image/${imageOrId}`);
       if (!resp.ok) throw new Error('Image not found');
       const data: GalleryImage = await resp.json();
       setSelectedImageDetail(data);
@@ -422,12 +426,15 @@ export function useGallery() {
         const data: GalleryImage = await resp.json();
         await fetchGalleryTags();
         await fetchGalleryImages();
+        if (selectedImageDetail && selectedImageDetail.relative_path === relativePath) {
+          setSelectedImageDetail(data);
+        }
         return { success: true, image: data };
       } catch (err: any) {
         return { success: false, error: err.message || 'Network error syncing image' };
       }
     },
-    [fetchGalleryTags, fetchGalleryImages]
+    [fetchGalleryTags, fetchGalleryImages, selectedImageDetail]
   );
 
   // Check initial sync status on mount if background sync is already running

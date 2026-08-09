@@ -28,6 +28,23 @@ import {
   Sparkles,
 } from 'lucide-react';
 import type { AppConfig, TagConfig } from '@/types';
+import { AdvancedApiParams } from './AdvancedApiParams';
+
+// Keys that live in model.params but are NOT OpenAI API params (handled separately)
+const RESERVED_PARAM_KEYS = new Set(['system_prompt', 'user_prompt', '_advanced_enabled']);
+
+/** Extract non-reserved params from model.params for the Advanced section */
+function extractAdvancedParams(params?: Record<string, any>): Record<string, any> {
+  if (!params) return {};
+  return Object.fromEntries(
+    Object.entries(params).filter(([k]) => !RESERVED_PARAM_KEYS.has(k))
+  );
+}
+
+/** Extract the _advanced_enabled map (stored alongside params) */
+function extractEnabledMap(params?: Record<string, any>): Record<string, boolean> {
+  return (params?._advanced_enabled as Record<string, boolean>) ?? {};
+}
 
 const defaultConfig: AppConfig = {
   root_directory: '/data/images',
@@ -65,6 +82,10 @@ export const ConfigTab: React.FC = () => {
   const [newTagThreshold, setNewTagThreshold] = useState<number>(0.7);
   const [excludePatternInput, setExcludePatternInput] = useState<string>('');
 
+  // Advanced OpenAI API params
+  const [advancedParams, setAdvancedParams] = useState<Record<string, any>>({});
+  const [advancedEnabled, setAdvancedEnabled] = useState<Record<string, boolean>>({});
+
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -87,6 +108,10 @@ export const ConfigTab: React.FC = () => {
         },
       });
       setExcludePatternInput(config.exclude_patterns ? config.exclude_patterns.join(', ') : '');
+
+      // Populate advanced params from stored config
+      setAdvancedParams(extractAdvancedParams(config.model?.params));
+      setAdvancedEnabled(extractEnabledMap(config.model?.params));
     }
   }, [config]);
 
@@ -96,9 +121,29 @@ export const ConfigTab: React.FC = () => {
       .map((p) => p.trim())
       .filter((p) => p.length > 0);
 
+    // Merge enabled advanced params into model.params alongside prompts
+    const enabledAdvancedParams = Object.fromEntries(
+      Object.entries(advancedParams).filter(([k]) => advancedEnabled[k])
+    );
+
     const updatedData: AppConfig = {
       ...formData,
       exclude_patterns: excludes,
+      model: {
+        ...formData.model,
+        params: {
+          // Keep reserved params (system_prompt, user_prompt)
+          ...Object.fromEntries(
+            Object.entries(formData.model?.params ?? {}).filter(([k]) =>
+              RESERVED_PARAM_KEYS.has(k) && k !== '_advanced_enabled'
+            )
+          ),
+          // Merge in only the enabled advanced params
+          ...enabledAdvancedParams,
+          // Persist enabled map so we can re-populate the UI on reload
+          _advanced_enabled: advancedEnabled,
+        },
+      },
     };
 
     const res = await saveConfig(updatedData);
@@ -435,6 +480,15 @@ export const ConfigTab: React.FC = () => {
               }
             />
           </div>
+          {/* Advanced OpenAI API Parameters */}
+          <AdvancedApiParams
+            params={advancedParams}
+            enabledKeys={advancedEnabled}
+            onChange={(params, enabled) => {
+              setAdvancedParams(params);
+              setAdvancedEnabled(enabled);
+            }}
+          />
         </CardContent>
       </Card>
 

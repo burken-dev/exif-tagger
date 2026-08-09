@@ -63,7 +63,8 @@ jobs:
         run: |
           pip install --upgrade pip
           pip install -r requirements.txt
-          python -c "import pytest" 2>/dev/null || pip install pytest pytest-cov
+          pip install playwright pytest pytest-cov requests
+          python -m playwright install chromium
           pip install -e .
 
       - name: Run tests with coverage

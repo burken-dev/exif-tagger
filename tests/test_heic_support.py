@@ -39,3 +39,51 @@ def test_heic_exif_write_and_read():
     tags = get_existing_xptags(heic_path)
     assert tags == {"nature", "outdoor"}
 
+
+def test_heic_gallery_image_file_conversion(tmp_path, monkeypatch):
+    import io
+    from fastapi.testclient import TestClient
+    from exif_tagger.server import app
+
+    test_heic = tmp_path / "test_sample.heic"
+    img = Image.new("RGB", (80, 80), color="green")
+    img.save(test_heic, format="HEIF")
+
+    client = TestClient(app)
+
+    class DummyConfig:
+        root_directory = str(tmp_path)
+
+    monkeypatch.setattr("exif_tagger.server.load_config", lambda path: DummyConfig())
+
+    res = client.get(f"/api/gallery/image/file?path={test_heic.name}")
+    assert res.status_code == 200
+    assert res.headers["content-type"] == "image/jpeg"
+
+    output_img = Image.open(io.BytesIO(res.content))
+    assert output_img.format == "JPEG"
+    assert output_img.size == (80, 80)
+
+
+def test_heic_gallery_image_file_by_id_conversion(tmp_path, monkeypatch):
+    import io
+    from fastapi.testclient import TestClient
+    from exif_tagger.server import app
+
+    test_heic = tmp_path / "test_sample2.heic"
+    img = Image.new("RGB", (60, 60), color="red")
+    img.save(test_heic, format="HEIF")
+
+    client = TestClient(app)
+
+    monkeypatch.setattr("exif_tagger.server.get_image_by_id", lambda img_id: {"file_path": str(test_heic)})
+
+    res = client.get("/api/gallery/image/42/file")
+    assert res.status_code == 200
+    assert res.headers["content-type"] == "image/jpeg"
+
+    output_img = Image.open(io.BytesIO(res.content))
+    assert output_img.format == "JPEG"
+    assert output_img.size == (60, 60)
+
+

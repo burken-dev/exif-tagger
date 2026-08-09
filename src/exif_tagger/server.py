@@ -6,6 +6,7 @@ Runs as a long-lived service (uvicorn) instead of CLI batch execution.
 
 from __future__ import annotations
 
+import io
 import json
 import logging
 import os
@@ -16,8 +17,9 @@ from pathlib import Path
 from typing import Any
 
 from apscheduler.schedulers.background import BackgroundScheduler
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Response
 from fastapi.responses import FileResponse
+from PIL import Image
 from pydantic import BaseModel
 
 from exif_tagger.ai_client import SecretRedactor, setup_secure_logging
@@ -621,6 +623,14 @@ def api_get_gallery_image_file_by_path(path: str):
     if resolved_path.suffix.lower() not in IMAGE_EXTENSIONS:
         raise HTTPException(status_code=400, detail="Invalid image file extension")
 
+    if resolved_path.suffix.lower() in (".heic", ".heif"):
+        with Image.open(resolved_path) as img:
+            if img.mode != "RGB":
+                img = img.convert("RGB")
+            buf = io.BytesIO()
+            img.save(buf, format="JPEG", quality=85)
+            return Response(content=buf.getvalue(), media_type="image/jpeg")
+
     return FileResponse(resolved_path)
 
 
@@ -663,6 +673,14 @@ def api_get_gallery_image_file(image_id: int):
     file_path = Path(image_data["file_path"])
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="Image file does not exist on disk")
+
+    if file_path.suffix.lower() in (".heic", ".heif"):
+        with Image.open(file_path) as img:
+            if img.mode != "RGB":
+                img = img.convert("RGB")
+            buf = io.BytesIO()
+            img.save(buf, format="JPEG", quality=85)
+            return Response(content=buf.getvalue(), media_type="image/jpeg")
 
     return FileResponse(file_path)
 

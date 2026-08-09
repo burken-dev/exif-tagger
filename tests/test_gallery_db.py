@@ -249,7 +249,8 @@ def test_sync_single_image_not_found(tmp_path):
 
 def test_sync_gallery_index_does_not_wipe_model_tags_or_suppress_them(tmp_path):
     from datetime import UTC, datetime
-    from exif_tagger.db import get_connection, init_db, sync_gallery_index, get_gallery_images
+
+    from exif_tagger.db import get_connection, get_gallery_images, init_db, sync_gallery_index
 
     db_path = tmp_path / "test.db"
     init_db(db_path)
@@ -295,6 +296,7 @@ def test_sync_gallery_index_does_not_wipe_model_tags_or_suppress_them(tmp_path):
 
 def test_sync_gallery_index_with_relative_db_paths(tmp_path):
     from datetime import UTC, datetime
+
     from exif_tagger.db import get_connection, init_db, sync_gallery_index
 
     db_path = tmp_path / "test.db"
@@ -327,5 +329,3 @@ def test_sync_gallery_index_with_relative_db_paths(tmp_path):
     assert len(rows) == 1
     assert rows[0]["id"] == original_id, f"Expected id {original_id}, got {rows[0]['id']}"
     assert stats["deleted"] == 0
-
-

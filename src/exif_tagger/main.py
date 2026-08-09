@@ -198,16 +198,19 @@ class ProcessingState:
 
     def add_log(self, text: str, level: str = "info") -> None:
         with self._lock:
-            self._log_counter += 1
-            self._log_entries.append(
-                {
-                    "id": self._log_counter,
-                    "text": text,
-                    "level": level,
-                }
-            )
-            if len(self._log_entries) > 500:
-                self._log_entries = self._log_entries[-500:]
+            for line in text.splitlines():
+                if not line.strip():
+                    continue
+                self._log_counter += 1
+                self._log_entries.append(
+                    {
+                        "id": self._log_counter,
+                        "text": line,
+                        "level": level,
+                    }
+                )
+            while len(self._log_entries) > 500:
+                self._log_entries.pop(0)
 
     def get_logs(self) -> list[dict[str, Any]]:
         with self._lock:
@@ -287,7 +290,6 @@ class PipelineEngine:
         config.root_directory = str(base_gallery_root)
 
         try:
-
             config_log_level = getattr(config, "log_level", "INFO")
             config_log_dir = getattr(config, "log_dir", "/app/logs")
             log_level = logging.DEBUG if self.verbose else config_log_level

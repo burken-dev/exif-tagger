@@ -35,9 +35,7 @@ from urllib.parse import urlparse
 _CHROMIUM_EXTRA_LIBS = "/tmp/chromium-libs/libs/usr/lib/x86_64-linux-gnu"
 if os.path.isdir(_CHROMIUM_EXTRA_LIBS):
     existing = os.environ.get("LD_LIBRARY_PATH", "")
-    os.environ["LD_LIBRARY_PATH"] = (
-        f"{_CHROMIUM_EXTRA_LIBS}:{existing}" if existing else _CHROMIUM_EXTRA_LIBS
-    )
+    os.environ["LD_LIBRARY_PATH"] = f"{_CHROMIUM_EXTRA_LIBS}:{existing}" if existing else _CHROMIUM_EXTRA_LIBS
     fonts_conf = "/tmp/chromium-libs/libs/etc/fonts/fonts.conf"
     if os.path.exists(fonts_conf):
         os.environ["FONTCONFIG_PATH"] = "/tmp/chromium-libs/libs/etc/fonts"
@@ -51,7 +49,7 @@ from playwright.sync_api import Page, sync_playwright
 # Paths and URLs
 # ---------------------------------------------------------------------------
 
-ROOT = Path(__file__).parent.parent.parent          # repo root
+ROOT = Path(__file__).parent.parent.parent  # repo root
 SCREENSHOTS_DIR = Path(__file__).parent / "screenshots"
 
 SERVER_URL = os.environ.get("E2E_SERVER_URL", "http://localhost:9100")
@@ -60,6 +58,7 @@ SERVER_URL = os.environ.get("E2E_SERVER_URL", "http://localhost:9100")
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _port_open(host: str, port: int) -> bool:
     """Return True if something is already listening on host:port."""
@@ -99,6 +98,7 @@ def screenshot(page: Page, name: str) -> Path:
 # ---------------------------------------------------------------------------
 # Server lifecycle fixture
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture(scope="session")
 def dev_server():
@@ -142,8 +142,10 @@ def dev_server():
             [
                 str(ROOT / ".venv/bin/uvicorn"),
                 "src.exif_tagger.server:app",
-                "--host", "0.0.0.0",
-                "--port", str(port),
+                "--host",
+                "0.0.0.0",
+                "--port",
+                str(port),
             ],
             cwd=str(ROOT),
             env=env,
@@ -167,6 +169,7 @@ def dev_server():
 # ---------------------------------------------------------------------------
 # Browser + screenshot fixture
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture()
 def browser_page(dev_server, request):

@@ -174,10 +174,9 @@ def sync_gallery_index(
                 except ValueError:
                     is_under_root = False
 
-                if is_under_root:
-                    if abs_db_path not in scanned_map or not db_p.exists():
-                        conn.execute("DELETE FROM images WHERE id = ?", (row["id"],))
-                        deleted_count += 1
+                if is_under_root and (abs_db_path not in scanned_map or not db_p.exists()):
+                    conn.execute("DELETE FROM images WHERE id = ?", (row["id"],))
+                    deleted_count += 1
 
             # 2. Insert or update scanned images
             for abs_path_str, img_path in scanned_map.items():

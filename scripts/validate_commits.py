@@ -30,9 +30,7 @@ ALLOWED_TYPES = [
 
 # Conventional Commits pattern: <type>(scope): <description> or <type>: <description> (min 10 chars)
 
-COMMIT_PATTERN = re.compile(
-    r"^(?P<type>" + "|".join(ALLOWED_TYPES) + r")(\([a-z0-9_-]+\))?: (?P<desc>.{10,})$"
-)
+COMMIT_PATTERN = re.compile(r"^(?P<type>" + "|".join(ALLOWED_TYPES) + r")(\([a-z0-9_-]+\))?: (?P<desc>.{10,})$")
 
 
 def get_commits(base_ref: str, head_ref: str):

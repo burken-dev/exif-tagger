@@ -34,8 +34,8 @@ class ModelConfig(BaseModel):
         description="When True, uses OpenAI response_format with JSON Schema for guaranteed valid structured output.",
     )
     image_format: str = Field(
-        default="webp",
-        description="Image format sent to the vision API. 'webp' (default) produces ~35% smaller payloads than 'jpeg'.",
+        default="jpeg",
+        description="Image format sent to the vision API. 'jpeg' (default for max compatibility) or 'webp'.",
     )
     image_quality: int = Field(
         default=80,

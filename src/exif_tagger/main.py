@@ -224,19 +224,11 @@ class PipelineEngine:
         self.state = ProcessingState()
         self._config = None
 
-    def _load_config(self, root_directory_override: str | None = None):
+    def _load_config(self):
         from exif_tagger.config import load_config
         from exif_tagger.models.schema import Config
 
         self._config: Config = load_config(self.config_path)
-        if root_directory_override:
-            override_path = Path(root_directory_override)
-            if override_path.is_absolute():
-                self._config.root_directory = str(override_path)
-            else:
-                # Relative paths from the folder browser are relative to the
-                # configured root_directory, not the process working directory.
-                self._config.root_directory = str(Path(self._config.root_directory) / override_path)
         self._config.validate()
         self._config.validate_exclude_patterns()
         return self._config
@@ -254,7 +246,29 @@ class PipelineEngine:
         logger = logging.getLogger("exif_tagger")
 
         try:
-            config = self._load_config(root_directory_override=root_directory)
+            config = self._load_config()
+            base_gallery_root = Path(config.root_directory).resolve()
+
+            target_subfolder: str | None = None
+            effective_gallery_root = base_gallery_root
+
+            if root_directory:
+                override_str = str(root_directory).strip()
+                if override_str and override_str != ".":
+                    override_path = Path(override_str)
+                    if override_path.is_absolute():
+                        resolved_override = override_path.resolve()
+                        try:
+                            rel = resolved_override.relative_to(base_gallery_root)
+                            if rel.as_posix() != ".":
+                                target_subfolder = rel.as_posix()
+                        except ValueError:
+                            effective_gallery_root = resolved_override
+                    else:
+                        target_subfolder = override_str.strip("/")
+
+            config.root_directory = str(effective_gallery_root)
+
             config_log_level = getattr(config, "log_level", "INFO")
             config_log_dir = getattr(config, "log_dir", "/app/logs")
             log_level = logging.DEBUG if self.verbose else config_log_level
@@ -293,7 +307,20 @@ class PipelineEngine:
                 root_directory=config.root_directory,
                 exclude_patterns=config.exclude_patterns or [],
             )
-            total_found = sync_stats.get("total", 0)
+
+            if target_subfolder:
+                conn = get_connection()
+                try:
+                    clean_sub = target_subfolder.lower()
+                    row = conn.execute(
+                        "SELECT COUNT(*) FROM images WHERE LOWER(relative_path) LIKE ? OR LOWER(relative_path) = ?",
+                        (f"{clean_sub}/%", clean_sub),
+                    ).fetchone()
+                    total_found = row[0] if row else 0
+                finally:
+                    conn.close()
+            else:
+                total_found = sync_stats.get("total", 0)
 
             # 3. Compute tag description hashes
             tag_hashes = {name: compute_tag_hash(tag_def.description) for name, tag_def in config.tags.items()}
@@ -310,6 +337,7 @@ class PipelineEngine:
                 root_directory=config.root_directory,
                 active_tags=config.tags,
                 tag_hashes=tag_hashes,
+                subfolder=target_subfolder,
                 limit=max_images,
             )
 
@@ -368,9 +396,7 @@ class PipelineEngine:
                 img_id = img_cand_list[0]["image_id"]
                 img_mtime = img_cand_list[0]["image_mtime"]
                 target_tags = {
-                    c["tag_name"]: config.tags[c["tag_name"]]
-                    for c in img_cand_list
-                    if c["tag_name"] in config.tags
+                    c["tag_name"]: config.tags[c["tag_name"]] for c in img_cand_list if c["tag_name"] in config.tags
                 }
 
                 try:
@@ -419,6 +445,7 @@ class PipelineEngine:
                         modified, n_new = tag_image_exif(img_path, sorted_tags)
 
                         from datetime import UTC, datetime
+
                         now_iso = datetime.now(UTC).isoformat()
                         conn = get_connection()
                         try:

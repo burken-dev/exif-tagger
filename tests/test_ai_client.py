@@ -153,6 +153,31 @@ class TestTagImageWithAi:
         # Should return at least one result from the mock
         assert len(result.results) >= 1
 
+    def test_default_image_format_uses_jpeg(self, sample_jpeg, monkeypatch):
+        """Verify default ModelConfig uses JPEG MIME type data:image/jpeg;base64,..."""
+        from unittest.mock import MagicMock
+
+        mock_client = MagicMock()
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock()]
+        mock_response.choices[0].message.content = '{"results": [{"tag_name": "landscape", "score": 0.9}]}'
+        mock_client.chat.completions.create.return_value = mock_response
+
+        monkeypatch.setattr("exif_tagger.ai_client.OpenAI", lambda **kwargs: mock_client)
+
+        model_config = ModelConfig(
+            base_url="https://api.test.com/v1",
+            model_name="test-model",
+        )
+        tags = {"landscape": TagDefinition(description="Natural scenery", threshold=0.7)}
+        tag_image_with_ai(model_config, sample_jpeg, tags)
+
+        assert mock_client.chat.completions.create.called
+        call_kwargs = mock_client.chat.completions.create.call_args.kwargs
+        user_msg = next(m for m in call_kwargs["messages"] if m["role"] == "user")
+        img_part = next(p for p in user_msg["content"] if p.get("type") == "image_url")
+        assert img_part["image_url"]["url"].startswith("data:image/jpeg;base64,")
+
 
 class TestNoTagsSkipsAiCall:
     """Verify that no AI call is made when there are zero tags."""

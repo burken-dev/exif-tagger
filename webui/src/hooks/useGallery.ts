@@ -24,7 +24,33 @@ export function useGallery() {
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
 
+  const currentFolderRef = useRef<string>(currentFolder);
+  const searchQueryRef = useRef<string>(searchQuery);
+  const selectedTagsRef = useRef<Set<string>>(selectedTags);
+  const currentPageRef = useRef<number>(currentPage);
+  const pageSizeRef = useRef<number>(pageSize);
+  const isPollingRef = useRef<boolean>(false);
   const isSyncingHashRef = useRef<boolean>(false);
+
+  useEffect(() => {
+    currentFolderRef.current = currentFolder;
+  }, [currentFolder]);
+
+  useEffect(() => {
+    searchQueryRef.current = searchQuery;
+  }, [searchQuery]);
+
+  useEffect(() => {
+    selectedTagsRef.current = selectedTags;
+  }, [selectedTags]);
+
+  useEffect(() => {
+    currentPageRef.current = currentPage;
+  }, [currentPage]);
+
+  useEffect(() => {
+    pageSizeRef.current = pageSize;
+  }, [pageSize]);
 
   // Parse URL Hash
   const parseUrlHash = useCallback(() => {
@@ -114,14 +140,20 @@ export function useGallery() {
     setLoading(true);
     setError(null);
     try {
-      const offset = (currentPage - 1) * pageSize;
-      const tagQuery = Array.from(selectedTags).join(',');
-      const trimmedSearch = searchQuery.trim();
+      const page = currentPageRef.current;
+      const size = pageSizeRef.current;
+      const tags = selectedTagsRef.current;
+      const query = searchQueryRef.current;
+      const folder = currentFolderRef.current;
 
-      let url = `/api/gallery/images?offset=${offset}&limit=${pageSize}`;
+      const offset = (page - 1) * size;
+      const tagQuery = Array.from(tags).join(',');
+      const trimmedSearch = query.trim();
+
+      let url = `/api/gallery/images?offset=${offset}&limit=${size}`;
       if (tagQuery) url += `&tags=${encodeURIComponent(tagQuery)}`;
       if (trimmedSearch) url += `&search=${encodeURIComponent(trimmedSearch)}`;
-      if (currentFolder) url += `&folder=${encodeURIComponent(currentFolder)}`;
+      if (folder) url += `&folder=${encodeURIComponent(folder)}`;
 
       const resp = await fetch(url);
       if (!resp.ok) throw new Error('Failed to fetch gallery images');
@@ -136,7 +168,7 @@ export function useGallery() {
     } finally {
       setLoading(false);
     }
-  }, [currentPage, pageSize, selectedTags, searchQuery, currentFolder]);
+  }, []);
 
   // Fetch Folders for modal / breadcrumbs navigation
   const fetchFolders = useCallback(async (path = '') => {
@@ -161,7 +193,7 @@ export function useGallery() {
 
   useEffect(() => {
     fetchGalleryImages();
-  }, [fetchGalleryImages]);
+  }, [fetchGalleryImages, currentFolder, searchQuery, selectedTags, currentPage, pageSize]);
 
   // Tag filter actions
   const toggleTagFilter = useCallback((tag: string) => {
@@ -353,24 +385,32 @@ export function useGallery() {
 
   // Poll sync status until complete or error
   const pollSyncStatus = useCallback(async () => {
-    while (true) {
-      await new Promise((resolve) => setTimeout(resolve, 800));
-      try {
-        const resp = await fetch('/api/gallery/sync/status');
-        if (resp.ok) {
-          const data = await resp.json();
-          if (data.status === 'complete') {
-            await fetchGalleryTags();
-            await fetchGalleryImages();
-            return { success: true, stats: data.stats || { total: 0, updated: 0 } };
+    if (isPollingRef.current) {
+      return { success: true };
+    }
+    isPollingRef.current = true;
+    try {
+      while (true) {
+        await new Promise((resolve) => setTimeout(resolve, 800));
+        try {
+          const resp = await fetch('/api/gallery/sync/status');
+          if (resp.ok) {
+            const data = await resp.json();
+            if (data.status === 'complete') {
+              await fetchGalleryTags();
+              await fetchGalleryImages();
+              return { success: true, stats: data.stats || { total: 0, updated: 0 } };
+            }
+            if (data.status === 'error') {
+              return { success: false, error: data.error || 'Gallery sync failed' };
+            }
           }
-          if (data.status === 'error') {
-            return { success: false, error: data.error || 'Gallery sync failed' };
-          }
+        } catch (err: any) {
+          console.error('Error polling sync status:', err);
         }
-      } catch (err: any) {
-        console.error('Error polling sync status:', err);
       }
+    } finally {
+      isPollingRef.current = false;
     }
   }, [fetchGalleryTags, fetchGalleryImages]);
 
@@ -384,9 +424,9 @@ export function useGallery() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             mode,
-            folder: currentFolder,
-            search: searchQuery,
-            tags: Array.from(selectedTags),
+            folder: currentFolderRef.current,
+            search: searchQueryRef.current,
+            tags: Array.from(selectedTagsRef.current),
           }),
         });
         if (!resp.ok) throw new Error('Sync failed');
@@ -405,7 +445,7 @@ export function useGallery() {
         setIsSyncing(false);
       }
     },
-    [currentFolder, searchQuery, selectedTags, fetchGalleryTags, fetchGalleryImages, pollSyncStatus]
+    [fetchGalleryTags, fetchGalleryImages, pollSyncStatus]
   );
 
   // Sync Single Image

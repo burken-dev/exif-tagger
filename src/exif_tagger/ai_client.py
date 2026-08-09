@@ -101,10 +101,10 @@ JPEG_QUALITY = 85
 def _image_to_base64(
     image_path: Path,
     max_dim: int = MAX_IMAGE_DIMENSION,
-    fmt: str = "webp",
+    fmt: str = "jpeg",
     quality: int = 80,
 ) -> str:
-    """Convert a local image file to base64-encoded WebP or JPEG (resized if needed)."""
+    """Convert a local image file to base64-encoded JPEG or WebP (resized if needed)."""
     with Image.open(image_path) as img:
         if img.mode in ("RGBA", "LA", "P") or img.mode != "RGB":
             img = img.convert("RGB")
@@ -304,7 +304,7 @@ def _call_vision_api(
     max_dim: int = MAX_IMAGE_DIMENSION,
 ) -> str:
     """Call the vision API with retries. Raises on persistent failure."""
-    fmt = getattr(model_config, "image_format", "webp")
+    fmt = getattr(model_config, "image_format", "jpeg")
     quality = getattr(model_config, "image_quality", 80)
     image_b64 = _image_to_base64(image_path, max_dim=max_dim, fmt=fmt, quality=quality)
     mime_type = "image/webp" if fmt == "webp" else "image/jpeg"

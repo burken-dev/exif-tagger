@@ -125,7 +125,7 @@ const OPENAI_PARAMS: ParamDef[] = [
     key: 'response_format',
     label: 'Response Format',
     description:
-      'An object specifying the format that the model must output. Use {"type":"json_object"} to enable JSON mode which guarantees the message the model generates is valid JSON. Use {"type":"json_schema","json_schema":{...}} for structured outputs.',
+      'An object specifying the format that the model must output. When Structured JSON Outputs is enabled above, this setting is managed automatically using the application\'s JSON schema. Disable Structured JSON Outputs above to configure custom response formats (e.g. {"type": "json_object"}).',
     type: 'json',
     placeholder: '{"type": "json_object"}',
   },
@@ -228,14 +228,16 @@ interface ParamRowProps {
   def: ParamDef;
   enabled: boolean;
   value: any;
+  useStructuredOutputs?: boolean;
   onToggle: (key: string, enabled: boolean) => void;
   onChange: (key: string, value: any) => void;
 }
 
-const ParamRow: React.FC<ParamRowProps> = ({ def, enabled, value, onToggle, onChange }) => {
+const ParamRow: React.FC<ParamRowProps> = ({ def, enabled, value, useStructuredOutputs, onToggle, onChange }) => {
   const [showTooltip, setShowTooltip] = useState(false);
   const [jsonError, setJsonError] = useState(false);
 
+  const isOverridden = def.key === 'response_format' && (useStructuredOutputs ?? true);
   const currentValue = value !== undefined ? value : def.defaultValue;
 
   const handleJsonChange = (raw: string) => {
@@ -253,11 +255,13 @@ const ParamRow: React.FC<ParamRowProps> = ({ def, enabled, value, onToggle, onCh
           <button
             type="button"
             role="switch"
+            disabled={isOverridden}
             aria-checked={!!currentValue}
-            onClick={() => onChange(def.key, !currentValue)}
+            onClick={() => !isOverridden && onChange(def.key, !currentValue)}
             className={`
               relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2
               ${currentValue ? 'bg-primary' : 'bg-input'}
+              ${isOverridden ? 'opacity-50 cursor-not-allowed' : ''}
             `}
           >
             <span
@@ -271,9 +275,10 @@ const ParamRow: React.FC<ParamRowProps> = ({ def, enabled, value, onToggle, onCh
       case 'enum':
         return (
           <select
+            disabled={isOverridden}
             value={currentValue ?? def.defaultValue ?? ''}
             onChange={(e) => onChange(def.key, e.target.value)}
-            className="h-8 rounded-md border border-input bg-transparent px-2 py-1 text-xs text-foreground shadow-sm focus:outline-none focus:ring-1 focus:ring-ring min-w-[120px]"
+            className="h-8 rounded-md border border-input bg-transparent px-2 py-1 text-xs text-foreground shadow-sm focus:outline-none focus:ring-1 focus:ring-ring min-w-[120px] disabled:cursor-not-allowed disabled:opacity-50"
           >
             {def.options?.map((opt) => (
               <option key={opt.value} value={opt.value}>
@@ -288,15 +293,17 @@ const ParamRow: React.FC<ParamRowProps> = ({ def, enabled, value, onToggle, onCh
           <div className="flex items-center gap-2">
             <input
               type="range"
+              disabled={isOverridden}
               min={def.min ?? 0}
               max={def.max ?? 1}
               step={def.step ?? 0.1}
               value={currentValue ?? def.defaultValue ?? 0}
               onChange={(e) => onChange(def.key, parseFloat(e.target.value))}
-              className="w-24 accent-primary"
+              className="w-24 accent-primary disabled:cursor-not-allowed disabled:opacity-50"
             />
             <input
               type="number"
+              disabled={isOverridden}
               min={def.min}
               max={def.max}
               step={def.step}
@@ -305,7 +312,7 @@ const ParamRow: React.FC<ParamRowProps> = ({ def, enabled, value, onToggle, onCh
                 const v = parseFloat(e.target.value);
                 if (!isNaN(v)) onChange(def.key, v);
               }}
-              className="w-16 h-8 rounded-md border border-input bg-transparent px-2 text-xs text-foreground shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
+              className="w-16 h-8 rounded-md border border-input bg-transparent px-2 text-xs text-foreground shadow-sm focus:outline-none focus:ring-1 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
             />
           </div>
         );
@@ -314,6 +321,7 @@ const ParamRow: React.FC<ParamRowProps> = ({ def, enabled, value, onToggle, onCh
         return (
           <input
             type="number"
+            disabled={isOverridden}
             min={def.min}
             max={def.max}
             step={def.step ?? 1}
@@ -323,7 +331,7 @@ const ParamRow: React.FC<ParamRowProps> = ({ def, enabled, value, onToggle, onCh
               const v = parseInt(e.target.value, 10);
               onChange(def.key, isNaN(v) ? undefined : v);
             }}
-            className="h-8 w-28 rounded-md border border-input bg-transparent px-2 text-xs text-foreground shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
+            className="h-8 w-28 rounded-md border border-input bg-transparent px-2 text-xs text-foreground shadow-sm focus:outline-none focus:ring-1 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
           />
         );
 
@@ -331,6 +339,7 @@ const ParamRow: React.FC<ParamRowProps> = ({ def, enabled, value, onToggle, onCh
         return (
           <input
             type="number"
+            disabled={isOverridden}
             min={def.min}
             max={def.max}
             step={def.step}
@@ -340,7 +349,7 @@ const ParamRow: React.FC<ParamRowProps> = ({ def, enabled, value, onToggle, onCh
               const v = parseFloat(e.target.value);
               onChange(def.key, isNaN(v) ? undefined : v);
             }}
-            className="h-8 w-28 rounded-md border border-input bg-transparent px-2 text-xs text-foreground shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
+            className="h-8 w-28 rounded-md border border-input bg-transparent px-2 text-xs text-foreground shadow-sm focus:outline-none focus:ring-1 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
           />
         );
 
@@ -348,10 +357,11 @@ const ParamRow: React.FC<ParamRowProps> = ({ def, enabled, value, onToggle, onCh
         return (
           <input
             type="text"
+            disabled={isOverridden}
             value={currentValue ?? ''}
             placeholder={def.placeholder}
             onChange={(e) => onChange(def.key, e.target.value || undefined)}
-            className="h-8 w-44 rounded-md border border-input bg-transparent px-2 text-xs text-foreground shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
+            className="h-8 w-44 rounded-md border border-input bg-transparent px-2 text-xs text-foreground shadow-sm focus:outline-none focus:ring-1 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
           />
         );
 
@@ -360,10 +370,11 @@ const ParamRow: React.FC<ParamRowProps> = ({ def, enabled, value, onToggle, onCh
           <div className="flex flex-col gap-1 w-full max-w-sm">
             <textarea
               rows={2}
+              disabled={isOverridden}
               value={valueToString(currentValue)}
               placeholder={def.placeholder}
               onChange={(e) => handleJsonChange(e.target.value)}
-              className={`w-full rounded-md border px-2 py-1 text-xs font-mono text-foreground shadow-sm focus:outline-none focus:ring-1 bg-transparent resize-none
+              className={`w-full rounded-md border px-2 py-1 text-xs font-mono text-foreground shadow-sm focus:outline-none focus:ring-1 bg-transparent resize-none disabled:cursor-not-allowed disabled:opacity-50
                 ${jsonError ? 'border-destructive focus:ring-destructive' : 'border-input focus:ring-ring'}
               `}
             />
@@ -384,28 +395,39 @@ const ParamRow: React.FC<ParamRowProps> = ({ def, enabled, value, onToggle, onCh
     <div
       className={`
         flex gap-3 rounded-lg border px-3 py-2.5 transition-colors
-        ${enabled
+        ${isOverridden
+          ? 'opacity-60 bg-muted/10 border-border'
+          : enabled
           ? 'border-primary/30 bg-primary/5'
           : 'border-border bg-transparent opacity-60'}
         ${isJsonType ? 'flex-col' : 'flex-row items-center'}
       `}
     >
-      {/* Left: checkbox + label + tooltip */}
+      {/* Left: checkbox + label + badge + tooltip */}
       <div className={`flex items-center gap-2 ${isJsonType ? 'w-full' : 'flex-1 min-w-0'}`}>
         {/* Checkbox toggle */}
         <input
           type="checkbox"
           id={`adv-param-${def.key}`}
           checked={enabled}
-          onChange={(e) => onToggle(def.key, e.target.checked)}
-          className="h-3.5 w-3.5 accent-primary shrink-0 cursor-pointer"
+          disabled={isOverridden}
+          onChange={(e) => !isOverridden && onToggle(def.key, e.target.checked)}
+          className="h-3.5 w-3.5 accent-primary shrink-0 cursor-pointer disabled:cursor-not-allowed"
         />
         <label
           htmlFor={`adv-param-${def.key}`}
-          className="text-xs font-medium text-foreground cursor-pointer select-none truncate"
+          className={`text-xs font-medium text-foreground select-none truncate ${
+            isOverridden ? 'cursor-not-allowed' : 'cursor-pointer'
+          }`}
         >
           {def.label}
         </label>
+
+        {isOverridden && (
+          <span className="inline-flex items-center gap-1 rounded bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-600 dark:text-amber-400 border border-amber-500/20 shrink-0">
+            Overridden by Structured JSON Outputs
+          </span>
+        )}
 
         {/* Info tooltip */}
         <div className="relative shrink-0">
@@ -451,12 +473,14 @@ interface AdvancedApiParamsProps {
   params: Record<string, any>;
   /** Which param keys are currently enabled */
   enabledKeys: Record<string, boolean>;
+  useStructuredOutputs?: boolean;
   onChange: (params: Record<string, any>, enabledKeys: Record<string, boolean>) => void;
 }
 
 export const AdvancedApiParams: React.FC<AdvancedApiParamsProps> = ({
   params,
   enabledKeys,
+  useStructuredOutputs,
   onChange,
 }) => {
   const [open, setOpen] = useState(false);
@@ -519,6 +543,7 @@ export const AdvancedApiParams: React.FC<AdvancedApiParamsProps> = ({
               def={def}
               enabled={!!enabledKeys[def.key]}
               value={params[def.key]}
+              useStructuredOutputs={useStructuredOutputs}
               onToggle={handleToggle}
               onChange={handleChange}
             />

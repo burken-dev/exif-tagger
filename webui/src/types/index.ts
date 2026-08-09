@@ -71,6 +71,8 @@ export interface AppConfig {
   model: ModelConfig;
   tags: Record<string, TagConfig>;
   exclude_patterns: string[];
+  log_level?: string;
+  log_dir?: string;
 }
 
 export interface ScheduleItem {

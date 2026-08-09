@@ -276,11 +276,16 @@ def api_get_config():
                 "temperature": config.ai_model.temperature,
                 "api_key": config.ai_model.api_key or "",
                 "use_structured_outputs": getattr(config.ai_model, "use_structured_outputs", False),
-                "max_image_dimension": getattr(config.ai_model, "max_image_dimension", 720),
+                "max_image_dimension": getattr(config.ai_model, "max_image_dimension", getattr(config, "max_image_dimension", 720)),
+                "image_format": getattr(config.ai_model, "image_format", "jpeg"),
+                "image_quality": getattr(config.ai_model, "image_quality", 80),
+                "concurrency": getattr(config.ai_model, "concurrency", 1),
                 "params": config.ai_model.params or {},
             },
             "tags": {name: td.model_dump() for name, td in config.tags.items()},
             "exclude_patterns": config.exclude_patterns or [],
+            "log_level": getattr(config, "log_level", "INFO"),
+            "log_dir": getattr(config, "log_dir", "/app/logs"),
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to load config: {e}")
@@ -317,6 +322,12 @@ def api_update_config(updates: dict[str, Any]):
             if isinstance(patterns, str):
                 patterns = [patterns]
             current["exclude_patterns"] = patterns
+
+        if "log_level" in updates:
+            current["log_level"] = updates["log_level"]
+
+        if "log_dir" in updates:
+            current["log_dir"] = updates["log_dir"]
 
         from exif_tagger.models.schema import Config as SchemaConfig
 

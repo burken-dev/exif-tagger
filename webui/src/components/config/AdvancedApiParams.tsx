@@ -162,14 +162,10 @@ const OPENAI_PARAMS: ParamDef[] = [
     key: 'reasoning_effort',
     label: 'Reasoning Effort',
     description:
-      'Constrains the effort on reasoning for reasoning models (e.g. o1, o3). Reducing reasoning effort can result in faster responses and fewer tokens used on reasoning.',
-    type: 'enum',
-    options: [
-      { value: 'low', label: 'low' },
-      { value: 'medium', label: 'medium' },
-      { value: 'high', label: 'high' },
-    ],
-    defaultValue: 'medium',
+      'Constrains the effort on reasoning for reasoning models (e.g. o1, o3, Qwen). Official supported examples: low, medium, high. Any custom value (e.g. "none") is also supported.',
+    type: 'string',
+    placeholder: 'e.g. low, medium, high, none',
+    defaultValue: '',
   },
   {
     key: 'store',
@@ -355,14 +351,21 @@ const ParamRow: React.FC<ParamRowProps> = ({ def, enabled, value, useStructuredO
 
       case 'string':
         return (
-          <input
-            type="text"
-            disabled={isOverridden}
-            value={currentValue ?? ''}
-            placeholder={def.placeholder}
-            onChange={(e) => onChange(def.key, e.target.value || undefined)}
-            className="h-8 w-44 rounded-md border border-input bg-transparent px-2 text-xs text-foreground shadow-sm focus:outline-none focus:ring-1 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
-          />
+          <div className="flex flex-col gap-1">
+            <input
+              type="text"
+              disabled={isOverridden}
+              value={currentValue ?? ''}
+              placeholder={def.placeholder}
+              onChange={(e) => onChange(def.key, e.target.value || undefined)}
+              className="h-8 w-44 rounded-md border border-input bg-transparent px-2 text-xs text-foreground shadow-sm focus:outline-none focus:ring-1 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-50 font-mono"
+            />
+            {def.key === 'reasoning_effort' && (
+              <span className="text-[10px] text-muted-foreground">
+                Official examples: <code className="text-primary">low</code>, <code className="text-primary">medium</code>, <code className="text-primary">high</code>
+              </span>
+            )}
+          </div>
         );
 
       case 'json':

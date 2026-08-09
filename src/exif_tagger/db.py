@@ -251,8 +251,12 @@ def get_gallery_images(
     tags: list[str] | None = None,
     search: str | None = None,
     folder: str | None = None,
+    root_directory: str | Path | None = None,
 ) -> tuple[list[dict[str, Any]], int]:
     """Retrieve paginated images matching optional tag filter, folder scope, or search/glob string.
+
+    When `tags` is empty or None, scans the filesystem directly (both indexed and unindexed)
+    sorted by relative_path ASC, filename ASC with batch-attached DB status.
 
     Returns (images_list, total_count).
     """
@@ -262,17 +266,140 @@ def get_gallery_images(
     try:
         clean_tags = [t.strip().lower() for t in (tags or []) if t.strip()]
 
+        if not clean_tags:
+            # Filesystem-first scanning for untagged queries
+            if root_directory is None:
+                first_row = conn.execute("SELECT file_path, relative_path FROM images LIMIT 1").fetchone()
+                if first_row:
+                    abs_p = Path(first_row["file_path"])
+                    rel_p = Path(first_row["relative_path"])
+                    inferred = abs_p
+                    for _ in rel_p.parts:
+                        inferred = inferred.parent
+                    if inferred.exists():
+                        root_directory = inferred
+
+            if root_directory is None:
+                from exif_tagger.config import load_config
+                try:
+                    config = load_config()
+                    root_directory = config.root_directory
+                    exclude_patterns = config.exclude_patterns
+                except Exception:
+                    root_directory = Path(".")
+                    exclude_patterns = None
+            else:
+                from exif_tagger.config import load_config
+                try:
+                    exclude_patterns = load_config().exclude_patterns
+                except Exception:
+                    exclude_patterns = None
+
+            root_path = Path(root_directory).resolve()
+
+            if folder:
+                clean_folder = folder.strip().strip("/")
+                if clean_folder and clean_folder != ".":
+                    target_path = root_path / clean_folder
+                else:
+                    target_path = root_path
+            else:
+                target_path = root_path
+
+            if not target_path.exists() or not target_path.is_dir():
+                return [], 0
+
+            scanned_paths = scan_images(target_path, exclude_patterns=exclude_patterns)
+
+            has_glob = search and any(char in search for char in ("*", "?", "["))
+            search_pattern = search.strip().lower() if search else None
+
+            matching_items = []
+            for img_path in scanned_paths:
+                try:
+                    rel_p = img_path.relative_to(root_path).as_posix()
+                except ValueError:
+                    rel_p = img_path.name
+                fname = img_path.name
+
+                if search_pattern:
+                    if has_glob:
+                        if not (fnmatch.fnmatch(fname.lower(), search_pattern) or fnmatch.fnmatch(rel_p.lower(), search_pattern)):
+                            continue
+                    else:
+                        if search_pattern not in fname.lower() and search_pattern not in rel_p.lower():
+                            continue
+
+                matching_items.append((img_path, rel_p, fname))
+
+            matching_items.sort(key=lambda item: (item[1].lower(), item[2].lower()))
+            total_count = len(matching_items)
+            page_slice = matching_items[offset : offset + limit]
+
+            slice_abs_paths = [str(item[0].resolve()) for item in page_slice]
+            db_map: dict[str, sqlite3.Row] = {}
+            if slice_abs_paths:
+                placeholders = ",".join("?" for _ in slice_abs_paths)
+                db_rows = conn.execute(
+                    f"SELECT id, file_path, filename, relative_path, last_modified FROM images WHERE file_path IN ({placeholders})",
+                    slice_abs_paths,
+                ).fetchall()
+                db_map = {r["file_path"]: r for r in db_rows}
+
+            found_ids = [r["id"] for r in db_map.values()]
+            tags_map: dict[int, list[str]] = {img_id: [] for img_id in found_ids}
+            if found_ids:
+                id_placeholders = ",".join("?" for _ in found_ids)
+                tag_rows = conn.execute(
+                    f"SELECT image_id, tag_name FROM image_tags WHERE image_id IN ({id_placeholders}) ORDER BY tag_name ASC",
+                    found_ids,
+                ).fetchall()
+                for tr in tag_rows:
+                    tags_map[tr["image_id"]].append(tr["tag_name"])
+
+            results = []
+            for img_path, rel_p, fname in page_slice:
+                abs_str = str(img_path.resolve())
+                db_row = db_map.get(abs_str)
+                if db_row:
+                    img_id = db_row["id"]
+                    results.append({
+                        "id": img_id,
+                        "file_path": db_row["file_path"],
+                        "filename": db_row["filename"],
+                        "relative_path": db_row["relative_path"],
+                        "last_modified": db_row["last_modified"],
+                        "indexed": True,
+                        "tags": tags_map.get(img_id, []),
+                    })
+                else:
+                    try:
+                        mtime = img_path.stat().st_mtime
+                    except OSError:
+                        mtime = 0.0
+                    results.append({
+                        "id": None,
+                        "file_path": abs_str,
+                        "filename": fname,
+                        "relative_path": rel_p,
+                        "last_modified": mtime,
+                        "indexed": False,
+                        "tags": [],
+                    })
+
+            return results, total_count
+
+        # DB-query branch for tagged filtering
         where_clauses: list[str] = []
         params: list[Any] = []
 
-        if clean_tags:
-            placeholders = ",".join("?" for _ in clean_tags)
-            where_clauses.append(f"""
-                id IN (
-                    SELECT DISTINCT image_id FROM image_tags WHERE tag_name IN ({placeholders})
-                )
-            """)
-            params.extend(clean_tags)
+        placeholders = ",".join("?" for _ in clean_tags)
+        where_clauses.append(f"""
+            id IN (
+                SELECT DISTINCT image_id FROM image_tags WHERE tag_name IN ({placeholders})
+            )
+        """)
+        params.extend(clean_tags)
 
         if folder:
             clean_folder = folder.strip().strip("/").lower()
@@ -296,15 +423,14 @@ def get_gallery_images(
                 SELECT id, file_path, filename, relative_path, last_modified
                 FROM images
                 {where_sql}
-                ORDER BY filename ASC, id ASC
+                ORDER BY relative_path ASC, filename ASC, id ASC
                 LIMIT ? OFFSET ?
             """
             query_params = list(params) + [limit, offset]
             rows = conn.execute(query_sql, query_params).fetchall()
         else:
-            # Glob search filtering using fnmatch
             all_rows = conn.execute(
-                f"SELECT id, file_path, filename, relative_path, last_modified FROM images {where_sql} ORDER BY filename ASC, id ASC",
+                f"SELECT id, file_path, filename, relative_path, last_modified FROM images {where_sql} ORDER BY relative_path ASC, filename ASC, id ASC",
                 params,
             ).fetchall()
 
@@ -339,12 +465,72 @@ def get_gallery_images(
                 "filename": r["filename"],
                 "relative_path": r["relative_path"],
                 "last_modified": r["last_modified"],
+                "indexed": True,
                 "tags": tags_map.get(r["id"], []),
             })
 
         return results, total_count
     finally:
         conn.close()
+
+
+def sync_single_image(
+    relative_or_abs_path: str | Path,
+    db_path: str | Path | None = None,
+    root_directory: str | Path | None = None,
+) -> dict[str, Any]:
+    """Index or update a single image file in the SQLite database and return its metadata record."""
+    from exif_tagger.config import load_config
+
+    if root_directory is None:
+        try:
+            config = load_config()
+            root_directory = config.root_directory
+        except Exception:
+            root_directory = Path(".")
+
+    root_path = Path(root_directory).resolve()
+    p = Path(relative_or_abs_path)
+
+    if p.is_absolute():
+        img_path = p.resolve()
+    else:
+        img_path = (root_path / p).resolve()
+
+    if not img_path.exists():
+        raise FileNotFoundError(f"Image file not found: {img_path}")
+
+    update_image_in_db_from_file(img_path, root_directory=root_path, db_path=db_path)
+
+    abs_str = str(img_path)
+    conn = get_connection(db_path)
+    try:
+        row = conn.execute(
+            "SELECT id, file_path, filename, relative_path, last_modified FROM images WHERE file_path = ?",
+            (abs_str,),
+        ).fetchone()
+
+        if not row:
+            raise RuntimeError(f"Failed to fetch indexed image from database: {abs_str}")
+
+        img_id = row["id"]
+        tag_rows = conn.execute(
+            "SELECT tag_name FROM image_tags WHERE image_id = ? ORDER BY tag_name ASC",
+            (img_id,),
+        ).fetchall()
+
+        return {
+            "id": img_id,
+            "file_path": row["file_path"],
+            "filename": row["filename"],
+            "relative_path": row["relative_path"],
+            "last_modified": row["last_modified"],
+            "indexed": True,
+            "tags": [tr["tag_name"] for tr in tag_rows],
+        }
+    finally:
+        conn.close()
+
 
 
 def get_gallery_folders(

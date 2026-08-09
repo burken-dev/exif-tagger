@@ -157,20 +157,27 @@ def sync_gallery_index(
     try:
         with conn:
             # 1. Purge records for files that no longer exist or are no longer in scanned set
-            existing_rows = conn.execute("SELECT id, file_path, last_modified FROM images").fetchall()
-            existing_db_map = {row["file_path"]: row for row in existing_rows}
+            existing_rows = conn.execute("SELECT id, file_path, relative_path, last_modified FROM images").fetchall()
+            existing_db_map = {}
+            for row in existing_rows:
+                raw_fp = row["file_path"]
+                p = Path(raw_fp)
+                abs_p = (root / p).resolve() if not p.is_absolute() else p.resolve()
+                existing_db_map[str(abs_p)] = row
+                existing_db_map[raw_fp] = row
 
-            for db_file_path, row in existing_db_map.items():
-                db_p = Path(db_file_path)
+            for abs_db_path, row in list(existing_db_map.items()):
+                db_p = Path(abs_db_path)
                 try:
                     db_p.relative_to(root)
                     is_under_root = True
                 except ValueError:
                     is_under_root = False
 
-                if (is_under_root and db_file_path not in scanned_map) or not db_p.exists():
-                    conn.execute("DELETE FROM images WHERE id = ?", (row["id"],))
-                    deleted_count += 1
+                if is_under_root:
+                    if abs_db_path not in scanned_map or not db_p.exists():
+                        conn.execute("DELETE FROM images WHERE id = ?", (row["id"],))
+                        deleted_count += 1
 
             # 2. Insert or update scanned images
             for abs_path_str, img_path in scanned_map.items():
@@ -203,29 +210,32 @@ def sync_gallery_index(
                     else:
                         image_id = db_entry["id"]
 
-                        # Self-healing: Check if any previous model tags were removed from EXIF
+                        conn.execute(
+                            """
+                            UPDATE images
+                            SET file_path = ?, filename = ?, relative_path = ?, last_modified = ?, indexed_at = ?
+                            WHERE id = ?
+                            """,
+                            (abs_path_str, img_path.name, rel_path, mtime, now_iso, image_id),
+                        )
+
                         old_tags = conn.execute(
                             "SELECT tag_name, source FROM image_tags WHERE image_id = ?", (image_id,)
                         ).fetchall()
                         clean_new_exif = {t.strip().lower() for t in exif_tags if t.strip()}
+                        old_tags_map = {ot["tag_name"].lower(): ot["source"] for ot in old_tags}
 
-                        for ot in old_tags:
-                            t_name = ot["tag_name"].lower()
-                            if ot["source"] == "model" and t_name not in clean_new_exif:
+                        # If a tag was in DB index but removed from EXIF on disk, record user suppression & remove from DB
+                        for t_name, source in old_tags_map.items():
+                            if t_name not in clean_new_exif:
                                 conn.execute(
                                     "INSERT OR IGNORE INTO user_suppressions (image_id, tag_name, suppressed_at, reason) VALUES (?, ?, ?, 'exif_removal')",
                                     (image_id, t_name, now_iso),
                                 )
-
-                        conn.execute(
-                            """
-                            UPDATE images
-                            SET filename = ?, relative_path = ?, last_modified = ?, indexed_at = ?
-                            WHERE id = ?
-                            """,
-                            (img_path.name, rel_path, mtime, now_iso, image_id),
-                        )
-                        conn.execute("DELETE FROM image_tags WHERE image_id = ?", (image_id,))
+                                conn.execute(
+                                    "DELETE FROM image_tags WHERE image_id = ? AND tag_name = ?",
+                                    (image_id, t_name),
+                                )
 
                     for t in exif_tags:
                         clean_tag = t.strip().lower()
@@ -279,17 +289,17 @@ def get_gallery_images(
         # Resolve root directory                                               #
         # ------------------------------------------------------------------ #
         if root_directory is None:
-            # Try to infer from DB records first (backward-compat for callers
-            # that don't supply root_directory when the DB already has entries)
             first_row = conn.execute("SELECT file_path, relative_path FROM images LIMIT 1").fetchone()
-            if first_row:
+            if first_row and first_row["file_path"]:
                 abs_p = Path(first_row["file_path"])
-                rel_p_parts = Path(first_row["relative_path"]).parts
-                inferred = abs_p
-                for _ in rel_p_parts:
-                    inferred = inferred.parent
-                if inferred.exists():
-                    root_directory = inferred
+                if abs_p.is_absolute():
+                    rel_p = Path(first_row["relative_path"])
+                    rel_parts = [p for p in rel_p.parts if p and p != "."]
+                    inferred = abs_p
+                    for _ in rel_parts:
+                        inferred = inferred.parent
+                    if inferred.exists() and inferred.is_dir():
+                        root_directory = inferred
 
         if root_directory is None:
             from exif_tagger.config import load_config as _load_config
@@ -357,23 +367,20 @@ def get_gallery_images(
         # ------------------------------------------------------------------ #
         # Batch-load all DB records and their tags for every file on disk     #
         # ------------------------------------------------------------------ #
-        all_abs_paths = [str(item[0].resolve()) for item in fs_items]
-
         db_map: dict[str, sqlite3.Row] = {}
-        if all_abs_paths:
-            # SQLite has a max of 999 variables per query; chunk if needed
-            chunk_size = 900
-            for i in range(0, len(all_abs_paths), chunk_size):
-                chunk = all_abs_paths[i : i + chunk_size]
-                placeholders = ",".join("?" for _ in chunk)
-                rows = conn.execute(
-                    f"SELECT id, file_path, filename, relative_path, last_modified FROM images WHERE file_path IN ({placeholders})",
-                    chunk,
-                ).fetchall()
-                for r in rows:
-                    db_map[r["file_path"]] = r
+        all_db_rows = conn.execute(
+            "SELECT id, file_path, filename, relative_path, last_modified FROM images"
+        ).fetchall()
+        for r in all_db_rows:
+            raw_fp = r["file_path"]
+            p = Path(raw_fp)
+            abs_p = (root_path / p).resolve() if not p.is_absolute() else p.resolve()
+            db_map[str(abs_p)] = r
+            db_map[raw_fp] = r
+            db_map[r["relative_path"]] = r
 
-        found_ids = [r["id"] for r in db_map.values()]
+        unique_db_rows = {r["id"]: r for r in db_map.values()}
+        found_ids = list(unique_db_rows.keys())
         tags_map: dict[int, list[str]] = {img_id: [] for img_id in found_ids}
         if found_ids:
             chunk_size = 900

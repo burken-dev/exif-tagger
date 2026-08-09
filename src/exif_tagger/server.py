@@ -591,7 +591,8 @@ def api_get_gallery_folders(path: str = ""):
     from exif_tagger.db import get_gallery_folders
 
     try:
-        data = get_gallery_folders(relative_path=path)
+        config = load_config(CONFIG_PATH)
+        data = get_gallery_folders(relative_path=path, root_directory=config.root_directory)
         return data
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to query gallery folders: {e}")

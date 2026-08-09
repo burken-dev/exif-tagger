@@ -7,6 +7,7 @@ import logging
 import sys
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
 
@@ -345,23 +346,31 @@ class PipelineEngine:
             successfully_tagged = 0
             failed_count = 0
             errors: list[str] = []
+            counters_lock = threading.Lock()
 
-            for i, img_path in enumerate(images_to_process, start=1):
+            concurrency = getattr(config.ai_model, "concurrency", 1)
+            logger.info("Processing %d images with concurrency=%d.", len(images_to_process), concurrency)
+
+            def process_image(img_path: Path) -> None:
+                nonlocal successfully_tagged, failed_count
+
                 if self.state.stop_requested:
-                    logger.info("Stop requested. Processing %d/%d images so far.", i - 1, len(images_to_process))
-                    break
+                    return
 
                 if self.verbose:
-                    logger.info("Processing image %d/%d: %s", i, len(images_to_process), img_path.name)
+                    logger.info("Processing: %s", img_path.name)
 
                 img_cand_list = images_candidates_map.get(str(img_path), [])
                 if not img_cand_list:
-                    continue
+                    self.state.update_progress(img_path.name)
+                    return
 
                 img_id = img_cand_list[0]["image_id"]
                 img_mtime = img_cand_list[0]["image_mtime"]
                 target_tags = {
-                    c["tag_name"]: config.tags[c["tag_name"]] for c in img_cand_list if c["tag_name"] in config.tags
+                    c["tag_name"]: config.tags[c["tag_name"]]
+                    for c in img_cand_list
+                    if c["tag_name"] in config.tags
                 }
 
                 try:
@@ -372,7 +381,6 @@ class PipelineEngine:
                         max_dim=config.max_image_dimension,
                     )
 
-                    # Get existing tags from DB
                     conn = get_connection()
                     try:
                         t_rows = conn.execute(
@@ -409,12 +417,8 @@ class PipelineEngine:
                     if newly_matched:
                         sorted_tags = sorted(current_exif_tags)
                         modified, n_new = tag_image_exif(img_path, sorted_tags)
-                        if modified:
-                            successfully_tagged += 1
 
-                        # Update DB image_tags
                         from datetime import UTC, datetime
-
                         now_iso = datetime.now(UTC).isoformat()
                         conn = get_connection()
                         try:
@@ -428,12 +432,30 @@ class PipelineEngine:
                         finally:
                             conn.close()
 
+                        if modified:
+                            with counters_lock:
+                                successfully_tagged += 1
+
                 except Exception as exc:
-                    failed_count += 1
-                    errors.append(f"{img_path.name}: {exc}")
+                    with counters_lock:
+                        failed_count += 1
+                        errors.append(f"{img_path.name}: {exc}")
                     logger.error("Failed to process %s: %s", img_path.name, exc)
 
                 self.state.update_progress(img_path.name)
+
+            with ThreadPoolExecutor(max_workers=concurrency) as executor:
+                futures = {executor.submit(process_image, p): p for p in images_to_process}
+                for future in as_completed(futures):
+                    if self.state.stop_requested:
+                        # Cancel pending futures (already-running ones finish naturally)
+                        for f in futures:
+                            f.cancel()
+                        break
+                    # Propagate unexpected exceptions from the worker
+                    exc = future.exception()
+                    if exc:
+                        logger.error("Unexpected worker error: %s", exc)
 
             summary = {
                 "root_directory": config.root_directory,

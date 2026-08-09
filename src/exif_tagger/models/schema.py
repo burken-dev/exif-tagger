@@ -33,11 +33,35 @@ class ModelConfig(BaseModel):
         default=False,
         description="When True, uses OpenAI response_format with JSON Schema for guaranteed valid structured output.",
     )
+    image_format: str = Field(
+        default="webp",
+        description="Image format sent to the vision API. 'webp' (default) produces ~35% smaller payloads than 'jpeg'.",
+    )
+    image_quality: int = Field(
+        default=80,
+        ge=1,
+        le=100,
+        description="Compression quality for the image sent to the vision API (1–100). Lower = smaller payload.",
+    )
+    concurrency: int = Field(
+        default=1,
+        ge=1,
+        le=16,
+        description="Number of parallel vision API requests. Increase to saturate local GPU batching (2–4 recommended for local models).",
+    )
     params: dict[str, Any] = Field(
         default_factory=dict,
         description="Additional parameters passed directly to the vision API call. "
         "Explicit fields like temperature and max_tokens take priority over duplicate keys.",
     )
+
+    @field_validator("image_format", mode="before")
+    @classmethod
+    def _validate_image_format(cls, value: str) -> str:
+        allowed = {"webp", "jpeg"}
+        if isinstance(value, str) and value.lower() in allowed:
+            return value.lower()
+        raise ValueError(f"image_format must be one of {allowed}, got '{value}'")
 
     @field_validator("api_key", mode="before")
     @classmethod

@@ -98,8 +98,13 @@ RETRY_BASE_DELAY = 2.0
 JPEG_QUALITY = 85
 
 
-def _image_to_base64(image_path: Path, max_dim: int = MAX_IMAGE_DIMENSION) -> str:
-    """Convert a local image file to base64-encoded JPEG (resized if needed)."""
+def _image_to_base64(
+    image_path: Path,
+    max_dim: int = MAX_IMAGE_DIMENSION,
+    fmt: str = "webp",
+    quality: int = 80,
+) -> str:
+    """Convert a local image file to base64-encoded WebP or JPEG (resized if needed)."""
     with Image.open(image_path) as img:
         if img.mode in ("RGBA", "LA", "P") or img.mode != "RGB":
             img = img.convert("RGB")
@@ -114,7 +119,8 @@ def _image_to_base64(image_path: Path, max_dim: int = MAX_IMAGE_DIMENSION) -> st
         import io
 
         buffer = io.BytesIO()
-        img.save(buffer, format="JPEG", quality=85)
+        pil_format = "WEBP" if fmt == "webp" else "JPEG"
+        img.save(buffer, format=pil_format, quality=quality)
         return base64.b64encode(buffer.getvalue()).decode("utf-8")
 
 
@@ -298,7 +304,10 @@ def _call_vision_api(
     max_dim: int = MAX_IMAGE_DIMENSION,
 ) -> str:
     """Call the vision API with retries. Raises on persistent failure."""
-    image_b64 = _image_to_base64(image_path, max_dim=max_dim)
+    fmt = getattr(model_config, "image_format", "webp")
+    quality = getattr(model_config, "image_quality", 80)
+    image_b64 = _image_to_base64(image_path, max_dim=max_dim, fmt=fmt, quality=quality)
+    mime_type = "image/webp" if fmt == "webp" else "image/jpeg"
 
     # Extract system_prompt and user_prompt from params if present
     params_copy = dict(model_config.params or {})
@@ -314,7 +323,7 @@ def _call_vision_api(
         {
             "type": "image_url",
             "image_url": {
-                "url": f"data:image/jpeg;base64,{image_b64}",
+                "url": f"data:{mime_type};base64,{image_b64}",
             },
         },
     ]

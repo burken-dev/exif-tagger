@@ -56,6 +56,9 @@ const defaultConfig: AppConfig = {
     api_key: '',
     use_structured_outputs: true,
     max_image_dimension: 720,
+    image_format: 'webp',
+    image_quality: 80,
+    concurrency: 1,
     params: {
       system_prompt:
         'You are an expert AI vision assistant specializing in image analysis and metadata tagging.',
@@ -458,6 +461,87 @@ export const ConfigTab: React.FC = () => {
                 }
                 className="text-sm"
               />
+            </div>
+          </div>
+
+          {/* Image format, quality & concurrency */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium text-foreground">Image Format</label>
+              <div className="flex rounded-md border border-input overflow-hidden h-9 text-sm">
+                {(['webp', 'jpeg'] as const).map((fmt) => (
+                  <button
+                    key={fmt}
+                    type="button"
+                    onClick={() =>
+                      setFormData((prev) => ({
+                        ...prev,
+                        model: { ...prev.model, image_format: fmt },
+                      }))
+                    }
+                    className={`flex-1 transition-colors font-medium uppercase text-xs tracking-wide ${
+                      (formData.model?.image_format ?? 'webp') === fmt
+                        ? 'bg-primary text-primary-foreground'
+                        : 'bg-transparent text-muted-foreground hover:text-foreground hover:bg-accent'
+                    }`}
+                  >
+                    {fmt}
+                  </button>
+                ))}
+              </div>
+              <p className="text-xs text-muted-foreground">
+                WebP is ~35% smaller; use JPEG for max compatibility.
+              </p>
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium text-foreground">
+                Image Quality
+                <span className="ml-1.5 text-xs text-muted-foreground font-normal">
+                  ({formData.model?.image_quality ?? 80})
+                </span>
+              </label>
+              <div className="flex items-center gap-2 pt-1">
+                <input
+                  type="range"
+                  min={1}
+                  max={100}
+                  step={1}
+                  value={formData.model?.image_quality ?? 80}
+                  onChange={(e) =>
+                    setFormData((prev) => ({
+                      ...prev,
+                      model: { ...prev.model, image_quality: parseInt(e.target.value) },
+                    }))
+                  }
+                  className="flex-1 accent-primary"
+                />
+              </div>
+              <p className="text-xs text-muted-foreground">Lower = smaller payload, faster upload.</p>
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium text-foreground">Concurrency</label>
+              <Input
+                type="number"
+                min={1}
+                max={16}
+                step={1}
+                value={formData.model?.concurrency ?? 1}
+                onChange={(e) =>
+                  setFormData((prev) => ({
+                    ...prev,
+                    model: {
+                      ...prev.model,
+                      concurrency: Math.max(1, Math.min(16, parseInt(e.target.value) || 1)),
+                    },
+                  }))
+                }
+                className="text-sm"
+              />
+              <p className="text-xs text-muted-foreground">
+                Parallel API requests (2–4 for local GPU batching).
+              </p>
             </div>
           </div>
 

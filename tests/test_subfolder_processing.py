@@ -5,9 +5,13 @@ from unittest.mock import patch
 
 from PIL import Image
 
+import pytest
+from fastapi.testclient import TestClient
+
 from exif_tagger.db import get_connection, get_gallery_folders, sync_gallery_index
 from exif_tagger.main import PipelineEngine
 from exif_tagger.models.schema import TaggingResponse, TagResult
+from exif_tagger.server import app
 
 
 def create_test_image(path: Path):
@@ -165,7 +169,6 @@ def test_validate_and_resolve_subfolder_valid_relative(tmp_path: Path):
 
 
 def test_validate_and_resolve_subfolder_breakout_attempts(tmp_path: Path):
-    import pytest
     from exif_tagger.main import validate_and_resolve_subfolder
 
     root = tmp_path / "gallery"
@@ -176,6 +179,47 @@ def test_validate_and_resolve_subfolder_breakout_attempts(tmp_path: Path):
         with pytest.raises(ValueError) as exc_info:
             validate_and_resolve_subfolder(bad_path, root)
         assert f"Requested path '{bad_path}' is outside the root image directory." in str(exc_info.value)
+
+
+def test_api_start_rejects_path_traversal(tmp_path: Path, monkeypatch):
+    client = TestClient(app)
+
+    # Attempt path traversal breakout via API
+    resp = client.post("/api/start", json={"rootDirectory": "../../etc/passwd"})
+    assert resp.status_code == 400
+    assert "is outside the root image directory" in resp.json()["detail"]
+
+
+def test_pipeline_engine_start_session_scoping(tmp_path: Path, monkeypatch):
+    root = tmp_path / "gallery"
+    root.mkdir()
+    (root / "img.jpg").touch()
+    sub = root / "subfolder"
+    sub.mkdir()
+    (sub / "sub_img.jpg").touch()
+
+    # Engine start_session with path traversal should fail validation
+    engine = PipelineEngine(config_path="config.yaml")
+    monkeypatch.setattr(
+        engine,
+        "_load_config",
+        lambda: type(
+            "Config",
+            (),
+            {
+                "root_directory": str(root),
+                "validate": lambda self: None,
+                "validate_exclude_patterns": lambda self: None,
+                "log_level": "INFO",
+                "log_dir": str(tmp_path / "logs"),
+            },
+        )(),
+    )
+
+    with pytest.raises(ValueError) as exc_info:
+        engine.start_session(root_directory="../../etc/passwd")
+    assert "outside the root image directory" in str(exc_info.value)
+
 
 
 

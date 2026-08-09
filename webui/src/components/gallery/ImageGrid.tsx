@@ -14,6 +14,7 @@ interface ImageGridProps {
   loading: boolean;
   totalImages: number;
   hasActiveFilters: boolean;
+  hasNonFolderFilters: boolean;
   onSync: () => void;
   isSyncing: boolean;
   onClearFilters: () => void;
@@ -29,6 +30,7 @@ export const ImageGrid: React.FC<ImageGridProps> = ({
   loading,
   totalImages,
   hasActiveFilters,
+  hasNonFolderFilters,
   onSync,
   isSyncing,
   onClearFilters,
@@ -90,7 +92,7 @@ export const ImageGrid: React.FC<ImageGridProps> = ({
             />
           ))}
         </div>
-      ) : !hasActiveFilters && totalImages === 0 ? (
+      ) : totalImages === 0 && !hasActiveFilters ? (
         /* Initial Sync Empty State */
         <div className="flex flex-col items-center justify-center min-h-[300px] border border-dashed border-border rounded-lg bg-card/20 py-16 text-center">
           <RefreshCw className={`w-12 h-12 text-primary/60 mb-3 stroke-1 ${isSyncing ? 'animate-spin' : ''}`} />
@@ -110,13 +112,13 @@ export const ImageGrid: React.FC<ImageGridProps> = ({
             {isSyncing ? 'Syncing Index...' : 'Run Initial Sync'}
           </Button>
         </div>
-      ) : (
-        /* Filtered Empty State */
+      ) : hasNonFolderFilters ? (
+        /* Tag/Search Filtered Empty State */
         <div className="flex flex-col items-center justify-center min-h-[300px] border border-dashed border-border rounded-lg bg-card/20 py-16 text-center">
           <ImageIcon className="w-12 h-12 text-muted-foreground/40 mb-3 stroke-1" />
           <p className="text-base font-semibold text-foreground">No photos matched your filters</p>
           <p className="text-xs text-muted-foreground max-w-sm mt-1 mb-4">
-            No photos matched your current search filters or folder scope. Try clearing your filters or changing directory.
+            No photos matched your current search or tag filters. Try clearing your filters.
           </p>
           <Button
             type="button"
@@ -127,6 +129,25 @@ export const ImageGrid: React.FC<ImageGridProps> = ({
           >
             <RotateCcw className="w-4 h-4" />
             Clear Filters
+          </Button>
+        </div>
+      ) : (
+        /* Folder Empty State */
+        <div className="flex flex-col items-center justify-center min-h-[300px] border border-dashed border-border rounded-lg bg-card/20 py-16 text-center">
+          <ImageIcon className="w-12 h-12 text-muted-foreground/40 mb-3 stroke-1" />
+          <p className="text-base font-semibold text-foreground">No images in this folder</p>
+          <p className="text-xs text-muted-foreground max-w-sm mt-1 mb-4">
+            This folder doesn't contain any supported image files.
+          </p>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={onClearFilters}
+            className="gap-2"
+          >
+            <RotateCcw className="w-4 h-4" />
+            Back to Root
           </Button>
         </div>
       )}

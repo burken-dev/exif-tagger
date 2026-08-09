@@ -56,6 +56,7 @@ export const GalleryTab: React.FC = () => {
   const [showManagementPanels, setShowManagementPanels] = useState(true);
 
   const hasActiveFilters = Boolean(currentFolder || searchQuery || selectedTags.size > 0);
+  const hasNonFolderFilters = Boolean(searchQuery || selectedTags.size > 0);
 
   const handleOpenFolderModal = () => {
     fetchFolders(currentFolder || '');
@@ -148,7 +149,7 @@ export const GalleryTab: React.FC = () => {
 
         <CardContent className="space-y-5">
           {/* Top Info Banner when totalImages === 0 && !isSyncing && !loading */}
-          {totalImages === 0 && !isSyncing && !loading && (
+          {totalImages === 0 && !isSyncing && !loading && !hasActiveFilters && (
             <div className="flex items-start gap-3 p-4 rounded-lg border border-indigo-500/30 bg-indigo-500/10 text-indigo-200 text-sm">
               <Info className="w-5 h-5 text-indigo-400 shrink-0 mt-0.5" />
               <div>
@@ -217,6 +218,7 @@ export const GalleryTab: React.FC = () => {
             loading={loading}
             totalImages={totalImages}
             hasActiveFilters={hasActiveFilters}
+            hasNonFolderFilters={hasNonFolderFilters}
             onSync={() => handleSyncIndex('all')}
             isSyncing={isSyncing}
             onClearFilters={() => {

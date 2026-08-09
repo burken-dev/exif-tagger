@@ -123,8 +123,8 @@ tags:
 
     with patch("exif_tagger.ai_client.tag_image_with_ai") as mock_ai:
         mock_ai.return_value = mock_res
-        # Pass root_directory with a leading slash e.g. "/folder1"
-        summary = engine.start_session(root_directory="/folder1")
+        # Pass root_directory with absolute subfolder path e.g. str(sub1)
+        summary = engine.start_session(root_directory=str(sub1))
 
     assert summary.get("total_processed") == 1
 
@@ -157,12 +157,12 @@ def test_validate_and_resolve_subfolder_valid_relative(tmp_path: Path):
     sub = root / "vacation" / "2026"
     sub.mkdir(parents=True)
 
-    # Leading slash should be stripped and treated relative to root
-    resolved_root, subfolder = validate_and_resolve_subfolder("/vacation/2026", root)
+    # Absolute path inside root
+    resolved_root, subfolder = validate_and_resolve_subfolder(str(sub), root)
     assert resolved_root == root.resolve()
     assert subfolder == "vacation/2026"
 
-    # Without leading slash
+    # Without leading slash (relative path)
     resolved_root, subfolder = validate_and_resolve_subfolder("vacation/2026", root)
     assert resolved_root == root.resolve()
     assert subfolder == "vacation/2026"
@@ -174,7 +174,7 @@ def test_validate_and_resolve_subfolder_breakout_attempts(tmp_path: Path):
     root = tmp_path / "gallery"
     root.mkdir()
 
-    bad_paths = ["../../etc/passwd", "/../outside", "../", "/../etc/passwd"]
+    bad_paths = ["../../etc/passwd", "/../outside", "../", "/../etc/passwd", "/etc/passwd"]
     for bad_path in bad_paths:
         with pytest.raises(ValueError) as exc_info:
             validate_and_resolve_subfolder(bad_path, root)
@@ -188,6 +188,10 @@ def test_api_start_rejects_path_traversal(tmp_path: Path, monkeypatch):
     resp = client.post("/api/start", json={"rootDirectory": "../../etc/passwd"})
     assert resp.status_code == 400
     assert "is outside the root image directory" in resp.json()["detail"]
+
+    resp2 = client.post("/api/start", json={"rootDirectory": "/etc/passwd"})
+    assert resp2.status_code == 400
+    assert resp2.json()["detail"] == "Requested path '/etc/passwd' is outside the root image directory."
 
 
 def test_pipeline_engine_start_session_scoping(tmp_path: Path, monkeypatch):

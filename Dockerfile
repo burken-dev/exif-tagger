@@ -57,9 +57,8 @@ WORKDIR /app
 
 RUN pip install --no-cache-dir pytest pytest-cov requests
 
-COPY config.dev.yaml ./config.dev.yaml
-COPY testimages/ ./testimages/
+RUN mkdir -p /app/testimages /app/data
+
 COPY tests/ ./tests/
 
-ENV EXIFTAGGER_CONFIG_FILE=/app/config.dev.yaml
 ENV EXIFTAGGER_ROOT_DIRECTORY=/app/testimages

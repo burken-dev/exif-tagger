@@ -61,4 +61,3 @@ RUN mkdir -p /app/testimages /app/data
 
 COPY tests/ ./tests/
 
-ENV EXIFTAGGER_ROOT_DIRECTORY=/app/testimages

@@ -61,3 +61,8 @@ testimages/
 
 # Generated design/spec docs
 docs/superpowers/
+
+# Local database & test screenshots
+gallery.db
+tests/e2e/screenshots/*.png
+

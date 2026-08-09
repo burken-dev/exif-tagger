@@ -81,3 +81,46 @@ tags:
     folder_counts_after = {f["name"]: f["image_count"] for f in folders_info_after["folders"]}
     assert folder_counts_after.get("folder1") == 1, f"folder1 count is {folder_counts_after.get('folder1')}"
     assert folder_counts_after.get("folder2") == 1, f"folder2 count is {folder_counts_after.get('folder2')}"
+
+
+def test_subfolder_processing_with_slash_prefix(tmp_path: Path, monkeypatch):
+    gallery_dir = tmp_path / "gallery"
+    sub1 = gallery_dir / "folder1"
+    sub2 = gallery_dir / "folder2"
+
+    img1_path = sub1 / "image1.jpg"
+    img2_path = sub2 / "image2.jpg"
+
+    create_test_image(img1_path)
+    create_test_image(img2_path)
+
+    db_path = tmp_path / "test.db"
+    monkeypatch.setenv("EXIFTAGGER_DB_FILE", str(db_path))
+
+    sync_gallery_index(root_directory=gallery_dir, db_path=db_path)
+
+    config_file = tmp_path / "config.yaml"
+    config_file.write_text(
+        f"""
+root_directory: "{gallery_dir}"
+model:
+  base_url: "https://api.openai.com/v1"
+  model_name: "test-model"
+  api_key: "test-key"
+tags:
+  nature:
+    description: "nature scene"
+    threshold: 0.5
+"""
+    )
+
+    engine = PipelineEngine(config_path=str(config_file))
+    mock_res = TaggingResponse(results=[TagResult(tag_name="nature", score=0.9, reason="good")])
+
+    with patch("exif_tagger.ai_client.tag_image_with_ai") as mock_ai:
+        mock_ai.return_value = mock_res
+        # Pass root_directory with a leading slash e.g. "/folder1"
+        summary = engine.start_session(root_directory="/folder1")
+
+    assert summary.get("total_processed") == 1
+

@@ -164,11 +164,16 @@ def _parse_response(content: str | bytes) -> TaggingResponse:
 
     cleaned = content.strip().lstrip("\ufeff")
 
-    # Try to extract JSON from markdown code blocks if present
+    # Strip markdown code fences if present (e.g. ```json ... ``` or ``` ... ```)
     if "```" in cleaned:
-        lines = cleaned.split("\n")
-        json_lines = [l for l in lines[1:] if not l.startswith("```")]  # type: ignore[str-bytes-safe]
-        cleaned = "\n".join(json_lines)
+        import re
+
+        match = re.search(r"```(?:json|JSON)?\s*\n?(.*?)\n?```", cleaned, re.DOTALL)
+        if match:
+            cleaned = match.group(1).strip()
+        else:
+            lines = [l for l in cleaned.splitlines() if not l.strip().startswith("```")]
+            cleaned = "\n".join(lines).strip()
 
     # Strip any text outside the JSON object (keep first '{' to last '}')
     brace_start = cleaned.find("{")

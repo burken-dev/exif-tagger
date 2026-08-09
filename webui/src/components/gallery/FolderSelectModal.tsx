@@ -80,10 +80,13 @@ export const FolderSelectModal: React.FC<FolderSelectModalProps> = ({
           {folders && folders.length > 0 ? (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
               {folders.map((f) => (
-                <button
+                <div
                   key={f.relative_path}
-                  type="button"
                   onClick={() => onNavigate(f.relative_path)}
+                  onDoubleClick={() => {
+                    onSelectFolder(f.relative_path);
+                    onOpenChange(false);
+                  }}
                   className="flex items-center justify-between p-3 rounded-lg border border-border bg-card hover:bg-accent/60 hover:border-accent transition-all text-left cursor-pointer group"
                 >
                   <div className="flex items-center gap-2.5 truncate min-w-0 pr-2">
@@ -92,10 +95,26 @@ export const FolderSelectModal: React.FC<FolderSelectModalProps> = ({
                       {f.name}
                     </span>
                   </div>
-                  <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-secondary text-secondary-foreground shrink-0">
-                    {f.image_count}
-                  </span>
-                </button>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-secondary text-secondary-foreground">
+                      {f.image_count}
+                    </span>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 px-2 text-xs hover:bg-primary hover:text-primary-foreground transition-colors"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onSelectFolder(f.relative_path);
+                        onOpenChange(false);
+                      }}
+                      title={`Select "${f.name}"`}
+                    >
+                      Select
+                    </Button>
+                  </div>
+                </div>
               ))}
             </div>
           ) : (
@@ -112,7 +131,9 @@ export const FolderSelectModal: React.FC<FolderSelectModalProps> = ({
           </Button>
           <Button onClick={handleSelectCurrent} className="gap-1.5">
             <Check className="w-4 h-4" />
-            Select Current Folder
+            {currentModalFolder
+              ? `Select Current Folder ("${currentModalFolder.split('/').pop()}")`
+              : 'Select Root Directory'}
           </Button>
         </DialogFooter>
       </DialogContent>

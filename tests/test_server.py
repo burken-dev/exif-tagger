@@ -144,6 +144,75 @@ exclude_patterns: []
             assert data["root_directory"] == "/tmp/images"
             assert "landscape" in data["tags"]
             assert data["tags"]["landscape"]["threshold"] == 0.7
+            assert "image_format" in data["model"]
+            assert "image_quality" in data["model"]
+            assert "concurrency" in data["model"]
+            assert "log_level" in data
+            assert "log_dir" in data
+        finally:
+            server_module.CONFIG_PATH = original_config
+            os.unlink(config_path)
+
+    def test_get_and_put_config_reasoning_effort_and_fields(self, client, tmp_path):
+        with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".yaml") as f:
+            f.write(f"""root_directory: {tmp_path}
+model:
+  base_url: http://localhost:8000/v1
+  model_name: test-model
+  image_format: webp
+  image_quality: 90
+  concurrency: 4
+  params:
+    reasoning_effort: none
+log_level: DEBUG
+log_dir: /tmp/logs
+tags: {{}}
+exclude_patterns: []
+""")
+            config_path = f.name
+
+        original_config = server_module.CONFIG_PATH
+        server_module.CONFIG_PATH = config_path
+
+        try:
+            # Test GET /api/config returns all parameters including custom reasoning_effort
+            resp = client.get("/api/config")
+            assert resp.status_code == 200
+            data = resp.json()
+            assert data["model"]["image_format"] == "webp"
+            assert data["model"]["image_quality"] == 90
+            assert data["model"]["concurrency"] == 4
+            assert data["model"]["params"]["reasoning_effort"] == "none"
+            assert data["log_level"] == "DEBUG"
+            assert data["log_dir"] == "/tmp/logs"
+
+            # Test PUT /api/config updates parameters properly
+            updates = {
+                "model": {
+                    "base_url": "http://localhost:8000/v1",
+                    "model_name": "test-model",
+                    "image_format": "jpeg",
+                    "image_quality": 75,
+                    "concurrency": 2,
+                    "params": {
+                        "reasoning_effort": "minimal_custom",
+                    },
+                },
+                "log_level": "WARNING",
+            }
+            put_resp = client.put("/api/config", json=updates)
+            assert put_resp.status_code == 200
+            assert put_resp.json() == {"status": "updated"}
+
+            # Verify GET after update
+            resp_after = client.get("/api/config")
+            assert resp_after.status_code == 200
+            data_after = resp_after.json()
+            assert data_after["model"]["image_format"] == "jpeg"
+            assert data_after["model"]["image_quality"] == 75
+            assert data_after["model"]["concurrency"] == 2
+            assert data_after["model"]["params"]["reasoning_effort"] == "minimal_custom"
+            assert data_after["log_level"] == "WARNING"
         finally:
             server_module.CONFIG_PATH = original_config
             os.unlink(config_path)

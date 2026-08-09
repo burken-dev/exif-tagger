@@ -43,7 +43,19 @@ function extractAdvancedParams(params?: Record<string, any>): Record<string, any
 
 /** Extract the _advanced_enabled map (stored alongside params) */
 function extractEnabledMap(params?: Record<string, any>): Record<string, boolean> {
-  return (params?._advanced_enabled as Record<string, boolean>) ?? {};
+  const storedMap = (params?._advanced_enabled as Record<string, boolean>) ?? {};
+  const enabledMap: Record<string, boolean> = { ...storedMap };
+
+  if (params) {
+    for (const key of Object.keys(params)) {
+      if (!RESERVED_PARAM_KEYS.has(key) && enabledMap[key] === undefined) {
+        // If a parameter exists in params but isn't explicitly in _advanced_enabled,
+        // it was loaded from the config file — mark it as enabled.
+        enabledMap[key] = true;
+      }
+    }
+  }
+  return enabledMap;
 }
 
 const defaultConfig: AppConfig = {
@@ -106,6 +118,7 @@ export const ConfigTab: React.FC = () => {
       setFormData({
         ...config,
         model: {
+          ...defaultConfig.model,
           ...config.model,
           params: mergedParams,
         },

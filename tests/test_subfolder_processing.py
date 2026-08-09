@@ -235,7 +235,3 @@ def test_pipeline_engine_start_session_scoping(tmp_path: Path, monkeypatch):
     with pytest.raises(ValueError) as exc_info:
         engine.start_session(root_directory="../../etc/passwd")
     assert "outside the root image directory" in str(exc_info.value)
-
-
-
-

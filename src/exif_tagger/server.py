@@ -285,7 +285,9 @@ def api_get_config():
                 "temperature": config.ai_model.temperature,
                 "api_key": config.ai_model.api_key or "",
                 "use_structured_outputs": getattr(config.ai_model, "use_structured_outputs", False),
-                "max_image_dimension": getattr(config.ai_model, "max_image_dimension", getattr(config, "max_image_dimension", 720)),
+                "max_image_dimension": getattr(
+                    config.ai_model, "max_image_dimension", getattr(config, "max_image_dimension", 720)
+                ),
                 "image_format": getattr(config.ai_model, "image_format", "jpeg"),
                 "image_quality": getattr(config.ai_model, "image_quality", 80),
                 "concurrency": getattr(config.ai_model, "concurrency", 1),
@@ -591,7 +593,8 @@ def api_get_gallery_folders(path: str = ""):
     from exif_tagger.db import get_gallery_folders
 
     try:
-        data = get_gallery_folders(relative_path=path)
+        config = load_config(CONFIG_PATH)
+        data = get_gallery_folders(relative_path=path, root_directory=config.root_directory)
         return data
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to query gallery folders: {e}")

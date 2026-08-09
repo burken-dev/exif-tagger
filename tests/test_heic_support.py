@@ -90,5 +90,3 @@ def test_heic_gallery_image_file_by_id_conversion(tmp_path, monkeypatch):
     output_img = Image.open(io.BytesIO(res.content))
     assert output_img.format == "JPEG"
     assert output_img.size == (60, 60)
-
-

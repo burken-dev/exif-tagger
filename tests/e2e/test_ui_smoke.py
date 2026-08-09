@@ -6,6 +6,7 @@ Structure:
   - Tab elements: <button role="tab" ...> or [role="tab"]
   - Active state: aria-selected="true" or data-state="active"
 """
+
 from __future__ import annotations
 
 from playwright.sync_api import Page
@@ -39,9 +40,7 @@ def test_all_four_tabs_present(browser_page: Page):
     tab_texts = [t.text_content().strip() for t in tabs]
     assert len(tabs) == 4, f"Expected 4 tabs, got {len(tabs)}. Texts: {tab_texts}"
     for expected in ("Processing", "Gallery", "Configuration", "Schedule"):
-        assert any(expected in t for t in tab_texts), (
-            f"Tab '{expected}' not found. Tabs: {tab_texts}"
-        )
+        assert any(expected in t for t in tab_texts), f"Tab '{expected}' not found. Tabs: {tab_texts}"
 
 
 def test_processing_tab_active_by_default(browser_page: Page):

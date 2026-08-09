@@ -6,6 +6,7 @@ Selectors derived from webui/src/:
   Config:      Model inputs, Save button
   Schedule:    Create/Add Schedule button
 """
+
 from __future__ import annotations
 
 from playwright.sync_api import Page
@@ -24,6 +25,7 @@ def _click_tab(page: Page, tab_name: str) -> None:
 # ---------------------------------------------------------------------------
 # Processing tab
 # ---------------------------------------------------------------------------
+
 
 def test_processing_tab_heading(browser_page: Page):
     """Processing tab shows 'Session Control' card heading."""
@@ -83,6 +85,7 @@ def test_processing_stop_button_disabled(browser_page: Page):
 # Gallery tab
 # ---------------------------------------------------------------------------
 
+
 def test_gallery_tab_renders_without_error(browser_page: Page):
     """Gallery tab renders without crashing."""
     _click_tab(browser_page, "Gallery")
@@ -103,6 +106,7 @@ def test_gallery_has_search_or_filter(browser_page: Page):
 # Configuration tab
 # ---------------------------------------------------------------------------
 
+
 def test_config_section_becomes_active(browser_page: Page):
     """Configuration tab renders settings cards."""
     _click_tab(browser_page, "Configuration")
@@ -121,6 +125,7 @@ def test_config_has_inputs(browser_page: Page):
 # ---------------------------------------------------------------------------
 # Schedule tab
 # ---------------------------------------------------------------------------
+
 
 def test_schedule_section_becomes_active(browser_page: Page):
     """Schedule tab renders scheduling controls."""

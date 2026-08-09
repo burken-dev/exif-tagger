@@ -245,3 +245,87 @@ def test_sync_single_image_not_found(tmp_path):
 
     with pytest.raises(FileNotFoundError):
         sync_single_image("nonexistent.jpg", db_path=db_path, root_directory=tmp_path)
+
+
+def test_sync_gallery_index_does_not_wipe_model_tags_or_suppress_them(tmp_path):
+    from datetime import UTC, datetime
+
+    from exif_tagger.db import get_connection, get_gallery_images, init_db, sync_gallery_index
+
+    db_path = tmp_path / "test.db"
+    init_db(db_path)
+
+    gallery_dir = tmp_path / "gallery"
+    gallery_dir.mkdir()
+    img_path = gallery_dir / "photo.jpg"
+    img = PILImage.new("RGB", (50, 50), color="blue")
+    img.save(img_path)
+    set_xptags(img_path, ["nature"])
+
+    now_iso = datetime.now(UTC).isoformat()
+    conn = get_connection(db_path)
+    cursor = conn.execute(
+        "INSERT INTO images (file_path, filename, relative_path, last_modified, indexed_at) VALUES (?, ?, ?, ?, ?)",
+        (str(img_path.resolve()), img_path.name, "photo.jpg", 0.0, now_iso),
+    )
+    img_id = cursor.lastrowid
+    conn.execute(
+        "INSERT INTO image_tags (image_id, tag_name, source, added_at) VALUES (?, ?, 'model', ?)",
+        (img_id, "nature", now_iso),
+    )
+    conn.commit()
+    conn.close()
+
+    # Re-sync gallery index
+    sync_gallery_index(root_directory=gallery_dir, db_path=db_path)
+
+    # Verify model tag was NOT deleted and NOT inserted into user_suppressions
+    conn = get_connection(db_path)
+    tags = conn.execute("SELECT tag_name, source FROM image_tags WHERE image_id = ?", (img_id,)).fetchall()
+    suppressions = conn.execute("SELECT * FROM user_suppressions WHERE image_id = ?", (img_id,)).fetchall()
+    conn.close()
+
+    assert len(tags) == 1
+    assert tags[0]["tag_name"] == "nature"
+    assert len(suppressions) == 0
+
+    images, total = get_gallery_images(db_path=db_path, root_directory=gallery_dir)
+    assert total == 1
+    assert "nature" in images[0]["tags"]
+
+
+def test_sync_gallery_index_with_relative_db_paths(tmp_path):
+    from datetime import UTC, datetime
+
+    from exif_tagger.db import get_connection, init_db, sync_gallery_index
+
+    db_path = tmp_path / "test.db"
+    init_db(db_path)
+
+    gallery_dir = tmp_path / "gallery"
+    gallery_dir.mkdir()
+    img_path = gallery_dir / "photo.jpg"
+    img = PILImage.new("RGB", (50, 50), color="blue")
+    img.save(img_path)
+
+    now_iso = datetime.now(UTC).isoformat()
+    conn = get_connection(db_path)
+    cursor = conn.execute(
+        "INSERT INTO images (file_path, filename, relative_path, last_modified, indexed_at) VALUES (?, ?, ?, ?, ?)",
+        ("photo.jpg", img_path.name, "photo.jpg", img_path.stat().st_mtime, now_iso),
+    )
+    original_id = cursor.lastrowid
+    conn.commit()
+    conn.close()
+
+    # Sync gallery index
+    stats = sync_gallery_index(root_directory=gallery_dir, db_path=db_path)
+
+    # Verify photo record was updated, not deleted and recreated with a new ID
+    conn = get_connection(db_path)
+    rows = conn.execute("SELECT id, file_path FROM images").fetchall()
+    conn.close()
+
+    assert len(rows) == 1
+    assert rows[0]["id"] == original_id, f"Expected id {original_id}, got {rows[0]['id']}"
+    assert stats["deleted"] == 0

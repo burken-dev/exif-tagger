@@ -21,9 +21,7 @@ class TestCheckpointPersistence:
             str(tmp_path / "a.jpg"): ImageCheckpoint(
                 path=str(tmp_path / "a.jpg"), status="done", matched_tags=["landscape"]
             ),
-            str(tmp_path / "b.jpg"): ImageCheckpoint(
-                path=str(tmp_path / "b.jpg"), status="failed", error="timeout"
-            ),
+            str(tmp_path / "b.jpg"): ImageCheckpoint(path=str(tmp_path / "b.jpg"), status="failed", error="timeout"),
         }
 
         save_checkpoint(str(tmp_path), total_images=5, images=images)

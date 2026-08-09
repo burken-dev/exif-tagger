@@ -20,7 +20,7 @@ def _validate_image_path(image_path: Path, base_dir: Path | None = None) -> Path
 
     SECURITY: Prevents path traversal attacks by ensuring resolved paths
     stay within expected directory boundaries when base_dir is provided.
-    
+
     Note: When base_dir is None, only resolves the path without existence check.
     This allows mock paths in tests to work correctly.
 
@@ -48,9 +48,7 @@ def _validate_image_path(image_path: Path, base_dir: Path | None = None) -> Path
         try:
             resolved.relative_to(base_resolved)
         except ValueError:
-            raise ValueError(
-                f"Path traversal blocked: '{resolved}' is outside allowed directory '{base_resolved}'"
-            )
+            raise ValueError(f"Path traversal blocked: '{resolved}' is outside allowed directory '{base_resolved}'")
 
     return resolved
 
@@ -139,7 +137,8 @@ def write_xptags(
     if not truly_new:
         logger.debug(
             "All %d new tags already present on %s – nothing to write",
-            len(new_tags_to_add), validated_path.name,
+            len(new_tags_to_add),
+            validated_path.name,
         )
         return False, 0
 
@@ -163,7 +162,9 @@ def write_xptags(
 
         logger.debug(
             "Wrote %d new XPTags to %s (total now: %d)",
-            len(truly_new), validated_path.name, len(merged),
+            len(truly_new),
+            validated_path.name,
+            len(merged),
         )
         return True, len(truly_new)
 
@@ -249,5 +250,3 @@ def _verify_image_integrity(image_path: Path) -> None:
 
     with PILImage.open(str(image_path)) as img:
         img.verify()
-
-

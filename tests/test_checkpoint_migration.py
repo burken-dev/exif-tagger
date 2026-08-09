@@ -62,7 +62,6 @@ def test_migrate_legacy_checkpoint(tmp_path: Path):
     with open(cp_file, "w", encoding="utf-8") as fh:
         json.dump(cp_data.model_dump(), fh)
 
-
     # Run migration
     migrated_count = migrate_legacy_checkpoint(root_directory=root, db_path=db_file)
     assert migrated_count == 1

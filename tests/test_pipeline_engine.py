@@ -152,7 +152,7 @@ class TestProcessingStateThreadSafety:
         from exif_tagger.main import ProcessingState
 
         state = ProcessingState()
-        
+
         errors: list[BaseException] = []
 
         def writer():
@@ -264,12 +264,12 @@ class TestPipelineEngineIntegration:
         images_dir.mkdir(exist_ok=True)
 
         from PIL import Image
+
         created_paths: list[PPath] = []
         for i in range(3):
             p = images_dir / f"img_{i}.jpg"
             Image.new("RGB", (50, 50), color=(255, 0, 0)).save(p, format="JPEG")
             created_paths.append(p)
-
 
         mock_response = MagicMock()
         mock_response.results = [TagResult(tag_name="dog", score=0.9)]
@@ -286,12 +286,17 @@ class TestPipelineEngineIntegration:
             ai_model: str = "test-model"
             max_image_dimension: int = 1024
 
-            def validate(self): pass
-            def validate_exclude_patterns(self): pass
+            def validate(self):
+                pass
+
+            def validate_exclude_patterns(self):
+                pass
 
         with patch("exif_tagger.config.load_config", return_value=MockConfig()):
             with patch("exif_tagger.image_scanner.scan_images", return_value=created_paths):
-                with patch("exif_tagger.image_scanner.filter_by_checkpoint", side_effect=lambda imgs, cp: (list(imgs), 0)):
+                with patch(
+                    "exif_tagger.image_scanner.filter_by_checkpoint", side_effect=lambda imgs, cp: (list(imgs), 0)
+                ):
                     with patch("exif_tagger.config.get_resume_info", return_value=None):
                         with patch("exif_tagger.ai_client.setup_secure_logging"):
                             with patch("exif_tagger.ai_client.tag_image_with_ai", return_value=mock_response):
@@ -326,7 +331,6 @@ class TestPipelineEngineIntegration:
         engine, _ = self._run_session(tmp_path)
         assert engine.state.running is False
 
-
     def test_start_session_updates_sqlite_db_per_image(self, tmp_path):
         from unittest.mock import MagicMock, patch
 
@@ -341,14 +345,14 @@ class TestPipelineEngineIntegration:
         img1 = PILImage.new("RGB", (50, 50), color="blue")
         img1.save(img1_path)
 
-
         db_path = tmp_path / "gallery.db"
 
         mock_response = MagicMock()
         mock_response.results = [TagResult(tag_name="dog", score=0.9)]
 
         class MockTagDef:
-            description = "A dog"; threshold = 0.5
+            description = "A dog"
+            threshold = 0.5
 
         class MockConfig:
             root_directory: str = str(images_dir)
@@ -357,14 +361,18 @@ class TestPipelineEngineIntegration:
             ai_model: str = "test-model"
             max_image_dimension: int = 1024
 
-            def validate(self): pass
-            def validate_exclude_patterns(self): pass
+            def validate(self):
+                pass
+
+            def validate_exclude_patterns(self):
+                pass
 
         with patch("exif_tagger.config.load_config", return_value=MockConfig()):
             with patch("exif_tagger.ai_client.setup_secure_logging"):
                 with patch("exif_tagger.ai_client.tag_image_with_ai", return_value=mock_response):
                     with patch("exif_tagger.db.get_db_path", return_value=db_path):
                         from exif_tagger.main import PipelineEngine
+
                         engine = PipelineEngine(config_path="config.yaml")
                         summary = engine.start_session(root_directory=str(images_dir))
 
@@ -375,14 +383,13 @@ class TestPipelineEngineIntegration:
         assert "dog" in images[0]["tags"]
 
 
-
 class TestRunFunction:
     """Tests that the run() CLI wrapper delegates correctly to PipelineEngine."""
 
     def test_run_calls_start_session(self, tmp_path):
         """run() should create a PipelineEngine and call start_session()."""
         from unittest.mock import patch
-        
+
         images_dir = tmp_path / "images"
         images_dir.mkdir(exist_ok=True)
 
@@ -393,40 +400,44 @@ class TestRunFunction:
         mock_summary = {"total_processed": 1, "errors": []}
 
         class MockTagDef:
-            description = "tag"; threshold = 0.5
-        
+            description = "tag"
+            threshold = 0.5
 
-        with patch("exif_tagger.config.load_config", return_value=MagicMock(
-            root_directory=str(images_dir), tags={"dog": MockTagDef()}, exclude_patterns=None, ai_model="test"
-        )):
+        with patch(
+            "exif_tagger.config.load_config",
+            return_value=MagicMock(
+                root_directory=str(images_dir), tags={"dog": MockTagDef()}, exclude_patterns=None, ai_model="test"
+            ),
+        ):
             with patch("exif_tagger.image_scanner.scan_images", return_value=[p1]):
+
                 def fake_filter(images, checkpoint):
                     return list(images), 0
-                
+
                 with patch("exif_tagger.image_scanner.filter_by_checkpoint", side_effect=fake_filter):
                     with patch("exif_tagger.config.get_resume_info", return_value=None):
                         mock_engine = MagicMock()
                         mock_engine.start_session.return_value = mock_summary
-                        
+
                         # Patch PipelineEngine constructor to use our mock
 
                         original_pipeline_class = None  # We'll patch directly in the module
-                        
+
     def test_run_returns_exit_code_from_errors(self):
         """run() should return exit code 1 when summary has errors."""
         from unittest.mock import patch
-        
+
         mock_summary_with_error = {"total_processed": 0, "errors": ["some error"]}
 
         with patch("exif_tagger.main.PipelineEngine") as MockPipeline:
             mock_instance = MagicMock()
             mock_instance.start_session.return_value = mock_summary_with_error
             MockPipeline.return_value = mock_instance
-            
+
             from exif_tagger.main import run
 
             exit_code = run(config_path="config.yaml")
-            
+
             assert exit_code == 1
 
     def test_run_returns_exit_0_on_success(self):
@@ -439,11 +450,11 @@ class TestRunFunction:
             mock_instance = MagicMock()
             mock_instance.start_session.return_value = mock_summary_ok
             MockPipeline.return_value = mock_instance
-            
+
             from exif_tagger.main import run
 
             exit_code = run(config_path="config.yaml")
-            
+
             assert exit_code == 0
 
 
@@ -452,24 +463,24 @@ class TestCLIEntryPoints:
 
     def test_build_parser_has_expected_arguments(self):
         from exif_tagger.main import _build_parser
-        
+
         parser = _build_parser()
-        
+
         # Verify known action arguments exist by checking parse result with defaults
         args = parser.parse_args([])
         assert hasattr(args, "config")
         assert args.config == "config.yaml"
-        assert hasattr(args, "verbose") is True or getattr(args, 'verbose', None) is not None
-        
+        assert hasattr(args, "verbose") is True or getattr(args, "verbose", None) is not None
+
     def test_build_parser_force_flag(self):
         from exif_tagger.main import _build_parser
 
         parser = _build_parser()
-        
-        # Check that --force exists and defaults to False  
+
+        # Check that --force exists and defaults to False
         args1 = parser.parse_args([])
         assert hasattr(args1, "force") or True  # argparse may not have it if action isn't defined
-        
+
     def test_log_tag_list_format(self):
         """_log_tag_list should print formatted tag output."""
         from exif_tagger.main import _log_tag_list
@@ -478,7 +489,7 @@ class TestCLIEntryPoints:
             "dog": MagicMock(description="A dog", threshold=0.5),
             "cat": MagicMock(description="A cat", threshold=0.8),
         }
-        
+
         # Just verify it runs without error and prints something
         try:
             _log_tag_list(tags)
@@ -488,7 +499,7 @@ class TestCLIEntryPoints:
     def test_format_summary_text(self):
         """_format_summary_text should produce a string with RUN SUMMARY."""
         from exif_tagger.main import _format_summary_text
-        
+
         summary = {
             "root_directory": "/tmp/imgs",
             "total_images_found": 10,
@@ -501,11 +512,11 @@ class TestCLIEntryPoints:
         }
 
         text = _format_summary_text(summary)
-        
+
         assert "RUN SUMMARY" in text
         assert "/tmp/imgs" in text
         assert "10" in text
-        
+
     def test_format_summary_with_errors(self):
         """_format_summary_text should include errors section."""
         from exif_tagger.main import _format_summary_text
@@ -522,6 +533,6 @@ class TestCLIEntryPoints:
         }
 
         text = _format_summary_text(summary)
-        
+
         assert "Errors:" in text
         assert "timeout" in text

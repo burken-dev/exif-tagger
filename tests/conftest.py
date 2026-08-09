@@ -13,6 +13,7 @@ from PIL import Image
 # Fixture to isolate SQLite database per test
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture(autouse=True)
 def isolate_test_db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     """Ensure every test operates on an isolated SQLite database file."""
@@ -89,6 +90,7 @@ def sample_config(tmp_path: Path):
 # Mock for OpenAI client (avoids real API calls in tests)
 # ---------------------------------------------------------------------------
 
+
 class _MockOpenAIClient:
     """Minimal mock of the OpenAI client that returns JSON responses.
 
@@ -103,9 +105,12 @@ class _MockOpenAIClient:
         class completions:
             @staticmethod
             def create(*args, **kwargs):  # type: ignore[no-untyped-def]
-                payload = {"results": [
-                    {"tag_name": "test_tag", "score": 0.9, "reason": "Mock match"},
-                ]}
+                payload = {
+                    "results": [
+                        {"tag_name": "test_tag", "score": 0.9, "reason": "Mock match"},
+                    ]
+                }
+
                 # Build a proper response structure – ai_client expects
                 # response.choices[0].message.content (string)
                 class _Msg:

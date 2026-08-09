@@ -66,8 +66,7 @@ def load_config(config_path: str | Path | None = None) -> Config:
             loaded = yaml.safe_load(fh) or {}
             if not isinstance(loaded, dict):
                 raise ValueError(
-                    f"config.yaml must contain a YAML mapping at the top level. "
-                    f"Got: {type(loaded).__name__}"
+                    f"config.yaml must contain a YAML mapping at the top level. Got: {type(loaded).__name__}"
                 )
             raw_config.update(loaded)
     elif config_path is not None and str(config_file) != str(DEFAULT_CONFIG_PATH):
@@ -122,9 +121,7 @@ def validate_path_within_base(target_path: str | Path, base_directory: str | Pat
         target.relative_to(base)
         return target
     except ValueError:
-        raise ValueError(
-            f"Path traversal blocked: '{target}' is outside allowed directory '{base}'"
-        )
+        raise ValueError(f"Path traversal blocked: '{target}' is outside allowed directory '{base}'")
 
 
 def get_checkpoint_path(root_directory: str | Path) -> Path:
@@ -133,24 +130,19 @@ def get_checkpoint_path(root_directory: str | Path) -> Path:
 
     candidate = base / checkpoint_name
     if candidate.parent != base:
-        raise ValueError(
-            f"Checkpoint path would be outside root directory: {candidate}"
-        )
+        raise ValueError(f"Checkpoint path would be outside root directory: {candidate}")
 
     return candidate
 
 
-def load_checkpoint(
-    root_directory: str, total_images: int
-) -> dict[str, ImageCheckpoint]:
+def load_checkpoint(root_directory: str, total_images: int) -> dict[str, ImageCheckpoint]:
     try:
         cp_path = get_checkpoint_path(root_directory)
 
         validated_path = validate_path_within_base(cp_path, root_directory)
-        
+
         if not validated_path.exists():
             return {}
-
 
         with open(validated_path, encoding="utf-8") as fh:
             data = json.load(fh)
@@ -187,9 +179,7 @@ def save_checkpoint(
     from datetime import datetime
 
     cp_path = get_checkpoint_path(root_directory)
-    processed_count = sum(
-        1 for img in images.values() if img.status == "done"
-    )
+    processed_count = sum(1 for img in images.values() if img.status == "done")
     from exif_tagger.models.schema import CheckpointData
 
     checkpoint = CheckpointData(
@@ -216,9 +206,7 @@ def save_checkpoint(
     os.replace(str(tmp_path), str(cp_path))
 
 
-def get_resume_info(
-    root_directory: str, total_images: int
-) -> dict[str, ImageCheckpoint] | None:
+def get_resume_info(root_directory: str, total_images: int) -> dict[str, ImageCheckpoint] | None:
     """Check if there's a checkpoint we can resume from.
 
     Returns checkpoint data if resumption is possible, else None.
@@ -235,6 +223,7 @@ def get_resume_info(
 def compute_tag_hash(description: str) -> str:
     """Compute a normalized SHA256 hex string hash of a tag description."""
     import hashlib
+
     normalized = description.strip().lower()
     return hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:16]
 
@@ -254,6 +243,7 @@ def migrate_legacy_checkpoint(
             return 0
 
         from exif_tagger.db import get_connection, init_db, record_tag_evaluation
+
         init_db(db_path)
         conn = get_connection(db_path)
         migrated_count = 0
@@ -301,4 +291,3 @@ def migrate_legacy_checkpoint(
     except Exception as exc:
         logger.warning("Legacy checkpoint migration failed: %s", exc)
         return 0
-

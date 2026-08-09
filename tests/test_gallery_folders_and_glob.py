@@ -139,4 +139,3 @@ def test_get_gallery_folders_unindexed_folders(tmp_path: Path):
 
     unindexed_item = next(f for f in res["folders"] if f["name"] == "new_unindexed_dir")
     assert unindexed_item["image_count"] == 0
-

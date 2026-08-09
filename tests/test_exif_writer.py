@@ -139,6 +139,7 @@ class TestWriteXptagsIntegrity:
         write_xptags(img, ["landscape"])
 
         from PIL import Image as PILImage
+
         with PILImage.open(str(img)) as pil_img:
             pil_img.verify()
 

@@ -26,13 +26,15 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
-        "-c", "--config",
+        "-c",
+        "--config",
         type=str,
         default="config.yaml",
         help="Path to config.yaml (default: ./config.yaml or $EXIFTAGGER_CONFIG_FILE)",
     )
     parser.add_argument(
-        "-v", "--verbose",
+        "-v",
+        "--verbose",
         action="store_true",
         help="Enable verbose per-image logging during processing.",
     )
@@ -79,12 +81,12 @@ def _format_summary_text(summary: dict) -> str:
         f"Failed:               {summary['failed']}",
     ]
 
-    if summary.get('errors'):
+    if summary.get("errors"):
         lines.append("")
         lines.append("Errors:")
-        for err in summary['errors'][:ERRORS_TO_DISPLAY_MAX]:
+        for err in summary["errors"][:ERRORS_TO_DISPLAY_MAX]:
             lines.append(f"  - {err}")
-        if len(summary['errors']) > ERRORS_TO_DISPLAY_MAX:
+        if len(summary["errors"]) > ERRORS_TO_DISPLAY_MAX:
             lines.append(f"  ... and {len(summary['errors']) - ERRORS_TO_DISPLAY_MAX} more")
 
     lines.extend(["", "=" * 60])
@@ -160,11 +162,13 @@ class ProcessingState:
     def add_log(self, text: str, level: str = "info") -> None:
         with self._lock:
             self._log_counter += 1
-            self._log_entries.append({
-                "id": self._log_counter,
-                "text": text,
-                "level": level,
-            })
+            self._log_entries.append(
+                {
+                    "id": self._log_counter,
+                    "text": text,
+                    "level": level,
+                }
+            )
             if len(self._log_entries) > 500:
                 self._log_entries = self._log_entries[-500:]
 
@@ -213,7 +217,6 @@ class ProcessingState:
 
 
 class PipelineEngine:
-
     def __init__(self, config_path: str, verbose: bool = False):
         self.config_path = config_path
         self.verbose = verbose
@@ -232,9 +235,7 @@ class PipelineEngine:
             else:
                 # Relative paths from the folder browser are relative to the
                 # configured root_directory, not the process working directory.
-                self._config.root_directory = str(
-                    Path(self._config.root_directory) / override_path
-                )
+                self._config.root_directory = str(Path(self._config.root_directory) / override_path)
         self._config.validate()
         self._config.validate_exclude_patterns()
         return self._config
@@ -258,7 +259,9 @@ class PipelineEngine:
             log_level = logging.DEBUG if self.verbose else config_log_level
             setup_secure_logging(level=log_level, log_dir=config_log_dir)
 
-            effective_level = logging.DEBUG if self.verbose else getattr(logging, str(config_log_level).upper(), logging.INFO)
+            effective_level = (
+                logging.DEBUG if self.verbose else getattr(logging, str(config_log_level).upper(), logging.INFO)
+            )
             state_handler = StateLoggingHandler(self.state)
             state_handler.setLevel(effective_level)
             logger.addHandler(state_handler)
@@ -292,10 +295,7 @@ class PipelineEngine:
             total_found = sync_stats.get("total", 0)
 
             # 3. Compute tag description hashes
-            tag_hashes = {
-                name: compute_tag_hash(tag_def.description)
-                for name, tag_def in config.tags.items()
-            }
+            tag_hashes = {name: compute_tag_hash(tag_def.description) for name, tag_def in config.tags.items()}
 
             # 4. Perform zero-cost local threshold re-evaluation
             local_stats = evaluate_thresholds_locally(
@@ -321,7 +321,8 @@ class PipelineEngine:
 
             logger.info(
                 "%d total images, %d require vision model evaluation.",
-                total_found, len(images_to_process),
+                total_found,
+                len(images_to_process),
             )
 
             if not images_to_process:
@@ -359,11 +360,15 @@ class PipelineEngine:
 
                 img_id = img_cand_list[0]["image_id"]
                 img_mtime = img_cand_list[0]["image_mtime"]
-                target_tags = {c["tag_name"]: config.tags[c["tag_name"]] for c in img_cand_list if c["tag_name"] in config.tags}
+                target_tags = {
+                    c["tag_name"]: config.tags[c["tag_name"]] for c in img_cand_list if c["tag_name"] in config.tags
+                }
 
                 try:
                     response = tag_image_with_ai(
-                        config.ai_model, img_path, target_tags,
+                        config.ai_model,
+                        img_path,
+                        target_tags,
                         max_dim=config.max_image_dimension,
                     )
 
@@ -409,6 +414,7 @@ class PipelineEngine:
 
                         # Update DB image_tags
                         from datetime import UTC, datetime
+
                         now_iso = datetime.now(UTC).isoformat()
                         conn = get_connection()
                         try:
@@ -450,13 +456,12 @@ class PipelineEngine:
 
             return summary
 
-
         except Exception as exc:
             logger.error("Fatal error: %s", exc, exc_info=True)
             err_msg = f"Fatal error: {exc}"
             self.state.add_log(err_msg, "error")
             summary = {
-                "root_directory": getattr(self._config, 'root_directory', ''),
+                "root_directory": getattr(self._config, "root_directory", ""),
                 "total_images_found": 0,
                 "total_processed": 0,
                 "successfully_tagged": 0,
@@ -519,7 +524,7 @@ def main() -> None:
 
     if args.list_tags:
         from exif_tagger.config import load_config
-        
+
         config = load_config(args.config)
         _log_tag_list(config.tags)
         sys.exit(0)

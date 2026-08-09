@@ -141,6 +141,7 @@ class TestGalleryDatabase:
 
     def test_update_image_in_db_from_file(self, test_db_path, tmp_path):
         from exif_tagger.db import update_image_in_db_from_file
+
         img_path = tmp_path / "single.jpg"
         img = PILImage.new("RGB", (100, 100), color="yellow")
         img.save(img_path)
@@ -156,14 +157,15 @@ class TestGalleryDatabase:
 
 def test_get_db_path_data_dir(monkeypatch, tmp_path):
     from exif_tagger.db import get_db_path
+
     monkeypatch.delenv("EXIFTAGGER_DB_FILE", raising=False)
     monkeypatch.setenv("EXIFTAGGER_DATA_DIR", str(tmp_path))
     assert get_db_path() == tmp_path / "gallery.db"
 
 
-
 def test_get_db_path_db_file_override(monkeypatch, tmp_path):
     from exif_tagger.db import get_db_path
+
     db_custom = tmp_path / "custom.db"
     monkeypatch.setenv("EXIFTAGGER_DB_FILE", str(db_custom))
     monkeypatch.setenv("EXIFTAGGER_DATA_DIR", str(tmp_path / "ignored"))
@@ -171,7 +173,7 @@ def test_get_db_path_db_file_override(monkeypatch, tmp_path):
 
 
 def test_get_gallery_images_filesystem_unindexed(tmp_path):
-    from exif_tagger.db import init_db, get_gallery_images, sync_single_image
+    from exif_tagger.db import get_gallery_images, init_db, sync_single_image
 
     db_path = tmp_path / "test.db"
     init_db(db_path)
@@ -203,7 +205,7 @@ def test_get_gallery_images_filesystem_unindexed(tmp_path):
 
 
 def test_get_gallery_images_untagged_folder_and_search(tmp_path):
-    from exif_tagger.db import init_db, get_gallery_images
+    from exif_tagger.db import get_gallery_images, init_db
 
     db_path = tmp_path / "test.db"
     init_db(db_path)
@@ -243,5 +245,3 @@ def test_sync_single_image_not_found(tmp_path):
 
     with pytest.raises(FileNotFoundError):
         sync_single_image("nonexistent.jpg", db_path=db_path, root_directory=tmp_path)
-
-

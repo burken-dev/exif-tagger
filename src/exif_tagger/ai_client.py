@@ -26,13 +26,13 @@ logger = logging.getLogger(__name__)
 
 class SecretRedactor(logging.Filter):
     SECRET_PATTERNS = [
-        r'sk-[a-zA-Z0-9]{20,}',
+        r"sk-[a-zA-Z0-9]{20,}",
         r'api_key[=:]\s*["\']?[^\s"\']+["\']?',
-        r'Bearer\s+[a-zA-Z0-9\-_]+',
-        r'sk-[a-fA-F0-9]{64}',
-        r'Authorization:\s*[^\s]+',
-        r'x-api-key:\s*[^\s]+',
-        r'api-key:\s*[^\s]+',
+        r"Bearer\s+[a-zA-Z0-9\-_]+",
+        r"sk-[a-fA-F0-9]{64}",
+        r"Authorization:\s*[^\s]+",
+        r"x-api-key:\s*[^\s]+",
+        r"api-key:\s*[^\s]+",
     ]
 
     def __init__(self, name: str = ""):
@@ -44,7 +44,7 @@ class SecretRedactor(logging.Filter):
         redacted_message = original_message
 
         for pattern in self._compiled_patterns:
-            redacted_message = pattern.sub('[REDACTED]', redacted_message)
+            redacted_message = pattern.sub("[REDACTED]", redacted_message)
 
         if redacted_message != original_message:
             record.msg = redacted_message
@@ -60,7 +60,6 @@ def setup_secure_logging(
 ) -> None:
     log_level = getattr(logging, level.upper(), logging.INFO) if isinstance(level, str) else level
 
-
     main_logger = logging.getLogger(logger_name)
     main_logger.setLevel(log_level)
 
@@ -69,10 +68,7 @@ def setup_secure_logging(
             handler.setLevel(log_level)
         return
 
-    formatter = logging.Formatter(
-        '%(asctime)s [%(levelname)s] %(name)s: %(message)s',
-        datefmt='%H:%M:%S'
-    )
+    formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s", datefmt="%H:%M:%S")
     redactor = SecretRedactor()
 
     stream_handler = logging.StreamHandler()
@@ -135,20 +131,22 @@ def _build_prompt(
     ]
 
     for name, definition in sorted(tag_definitions.items()):
-        lines.append(f"- {name}: \"{definition.description}\"")
+        lines.append(f'- {name}: "{definition.description}"')
 
     if not use_structured_outputs:
-        lines.extend([
-            "",
-            "Respond ONLY with valid JSON. Use this structure (no trailing commas):",
-            "{",
-            '  "results": [',
-            '    {"tag_name": "<tag>", "score": 0.85, "reason": "<brief reason>"}',
-            "  ]",
-            "}",
-            "",
-            "Do not include any text outside of the JSON object.",
-        ])
+        lines.extend(
+            [
+                "",
+                "Respond ONLY with valid JSON. Use this structure (no trailing commas):",
+                "{",
+                '  "results": [',
+                '    {"tag_name": "<tag>", "score": 0.85, "reason": "<brief reason>"}',
+                "  ]",
+                "}",
+                "",
+                "Do not include any text outside of the JSON object.",
+            ]
+        )
 
     return "\n".join(lines)
 
@@ -328,10 +326,27 @@ def _call_vision_api(
 
     # Standard OpenAI kwargs accepted by client.chat.completions.create
     known_openai_kwargs = {
-        "model", "messages", "max_tokens", "temperature", "top_p", "n", "stream",
-        "stop", "presence_penalty", "frequency_penalty", "logit_bias", "user",
-        "response_format", "seed", "tools", "tool_choice", "reasoning_effort",
-        "extra_body", "timeout", "extra_headers", "extra_query"
+        "model",
+        "messages",
+        "max_tokens",
+        "temperature",
+        "top_p",
+        "n",
+        "stream",
+        "stop",
+        "presence_penalty",
+        "frequency_penalty",
+        "logit_bias",
+        "user",
+        "response_format",
+        "seed",
+        "tools",
+        "tool_choice",
+        "reasoning_effort",
+        "extra_body",
+        "timeout",
+        "extra_headers",
+        "extra_query",
     }
 
     top_level_kwargs: dict[str, Any] = {}
@@ -390,7 +405,10 @@ def _call_vision_api(
             )
             logger.warning(
                 "Vision API attempt %d/%d failed for %s: %s",
-                attempt, MAX_RETRIES, image_path.name, exc,
+                attempt,
+                MAX_RETRIES,
+                image_path.name,
+                exc,
             )
             if attempt < MAX_RETRIES:
                 delay = RETRY_BASE_DELAY * (2 ** (attempt - 1))
@@ -398,8 +416,7 @@ def _call_vision_api(
                 time.sleep(delay)
 
     raise RuntimeError(
-        f"AI model failed after {MAX_RETRIES} attempts for image "
-        f"'{image_path}'. Last error: {last_error}"
+        f"AI model failed after {MAX_RETRIES} attempts for image '{image_path}'. Last error: {last_error}"
     )
 
 
@@ -425,4 +442,3 @@ def tag_image_with_ai(
     except ValueError as exc:
         logger.error("Failed to parse AI response for %s: %s", image_path.name, exc)
         raise
-

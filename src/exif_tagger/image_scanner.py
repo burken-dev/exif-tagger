@@ -74,9 +74,7 @@ def scan_images(
             excluded = False
             for compiler in compilers:
                 if compiler.search(full_rel):
-                    logger.debug(
-                        "Excluded %s (matched pattern '%s')", file_path, compiler.pattern
-                    )
+                    logger.debug("Excluded %s (matched pattern '%s')", file_path, compiler.pattern)
                     excluded = True
                     break
 
@@ -90,10 +88,7 @@ def scan_images(
     return image_paths
 
 
-def filter_by_checkpoint(
-    all_images: list[Path],
-    checkpoint: dict[str, ImageCheckpoint]
-) -> tuple[list[Path], int]:
+def filter_by_checkpoint(all_images: list[Path], checkpoint: dict[str, ImageCheckpoint]) -> tuple[list[Path], int]:
     """Separate images into 'to_process' and count of already-done ones.
 
     Args:

@@ -23,7 +23,7 @@ from pydantic import BaseModel
 from exif_tagger.ai_client import SecretRedactor, setup_secure_logging
 from exif_tagger.config import get_config_path, load_config
 from exif_tagger.main import PipelineEngine
-from exif_tagger.models.schema import ScheduleModel, TagDefinition
+from exif_tagger.models.schema import IMAGE_EXTENSIONS, ScheduleModel, TagDefinition
 
 logger = logging.getLogger(__name__)
 
@@ -56,10 +56,7 @@ SERVER_LOG_DIR = _config_dir / "server-log"
 SERVER_LOG_DIR.mkdir(parents=True, exist_ok=True)
 
 
-_log_formatter = logging.Formatter(
-    '%(asctime)s [%(levelname)s] %(name)s: %(message)s',
-    datefmt='%Y-%m-%d %H:%M:%S'
-)
+_log_formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
 
 _error_file_handler = logging.FileHandler(SERVER_LOG_DIR / "error.log")
 _error_file_handler.setLevel(logging.ERROR)
@@ -119,7 +116,6 @@ def _save_schedules() -> None:
         json.dump({sid: s.model_dump() for sid, s in _schedules.items()}, f, indent=2)
 
 
-
 def _compute_next_run(schedule: ScheduleModel) -> str | None:
     """Compute next run time based on schedule type."""
     now = datetime.now(UTC)
@@ -129,19 +125,18 @@ def _compute_next_run(schedule: ScheduleModel) -> str | None:
             minute, hour, dom, month, dow = parts
             try:
                 from apscheduler.triggers.cron import CronTrigger
-                trigger = CronTrigger(
-                    minute=minute, hour=hour, day=dom, month=month, day_of_week=dow, timezone=UTC
-                )
+
+                trigger = CronTrigger(minute=minute, hour=hour, day=dom, month=month, day_of_week=dow, timezone=UTC)
                 next_fire = trigger.get_next_fire_time(None, now)
                 return next_fire.isoformat() if next_fire else None
             except Exception:
                 return None
     elif schedule.interval_hours:
         from datetime import timedelta
+
         next_run = now.replace(microsecond=0) + timedelta(hours=schedule.interval_hours)
         return next_run.isoformat()
     return None
-
 
 
 def _run_schedule_job(schedule_id: str) -> None:
@@ -193,10 +188,7 @@ def _setup_scheduler() -> None:
             if len(parts) == 5:
                 minute, hour, dom, month, dow = parts
                 try:
-                    trigger = CronTrigger(
-                        minute=minute, hour=hour, day_of_week=dow,
-                        day=dom, month=month, timezone=UTC
-                    )
+                    trigger = CronTrigger(minute=minute, hour=hour, day_of_week=dow, day=dom, month=month, timezone=UTC)
                 except Exception as e:
                     logger.warning("Invalid cron expression for schedule '%s': %s", sid, e)
         elif schedule.interval_hours:
@@ -327,6 +319,7 @@ def api_update_config(updates: dict[str, Any]):
             current["exclude_patterns"] = patterns
 
         from exif_tagger.models.schema import Config as SchemaConfig
+
         validated = SchemaConfig(**current)
         validated.validate()
         validated.validate_exclude_patterns()
@@ -341,6 +334,7 @@ def api_update_config(updates: dict[str, Any]):
         error_detail = str(e)
         try:
             import re
+
             # Extract field: error pairs from Pydantic output
             matches = re.findall(r"(\w+):\s*(.+?)(?=,\s*\w+:|$)", error_detail)
             if matches:
@@ -353,6 +347,7 @@ def api_update_config(updates: dict[str, Any]):
 # ---------------------------------------------------------------------------
 # API Routes — Schedules
 # ---------------------------------------------------------------------------
+
 
 @app.get("/api/schedule")
 def api_list_schedules():
@@ -572,12 +567,12 @@ def api_get_gallery_images(
 def api_get_gallery_folders(path: str = ""):
     """Get folder hierarchy and subfolder image counts for gallery folder navigation."""
     from exif_tagger.db import get_gallery_folders
+
     try:
         data = get_gallery_folders(relative_path=path)
         return data
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to query gallery folders: {e}")
-
 
 
 @app.get("/api/gallery/tags")
@@ -600,10 +595,7 @@ def api_get_gallery_image_file_by_path(path: str):
         raise HTTPException(status_code=500, detail=f"Failed to load config: {e}")
 
     p = Path(path)
-    if p.is_absolute():
-        resolved_path = p.resolve()
-    else:
-        resolved_path = (root_dir / p).resolve()
+    resolved_path = p.resolve() if p.is_absolute() else (root_dir / p).resolve()
 
     try:
         resolved_path.relative_to(root_dir)
@@ -613,7 +605,6 @@ def api_get_gallery_image_file_by_path(path: str):
     if not resolved_path.exists() or not resolved_path.is_file():
         raise HTTPException(status_code=404, detail="Image file does not exist on disk")
 
-    from exif_tagger.models.schema import IMAGE_EXTENSIONS
     if resolved_path.suffix.lower() not in IMAGE_EXTENSIONS:
         raise HTTPException(status_code=400, detail="Invalid image file extension")
 
@@ -716,6 +707,7 @@ def api_remove_tag_global(req: GlobalTagRemoveRequest):
 def api_get_gallery_image_suppressions(image_id: int):
     """Get list of user suppressions (blacklisted tags) for an image."""
     from exif_tagger.db import get_image_suppressions
+
     try:
         suppressions = get_image_suppressions(image_id)
         return {"suppressions": suppressions}
@@ -727,12 +719,12 @@ def api_get_gallery_image_suppressions(image_id: int):
 def api_delete_gallery_image_suppression(image_id: int, tag_name: str):
     """Remove a user suppression, unblacklisting the tag for future automated runs."""
     from exif_tagger.db import remove_user_suppression
+
     try:
         remove_user_suppression(image_id, tag_name)
         return {"status": "removed"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to remove suppression: {e}")
-
 
 
 from fastapi.staticfiles import StaticFiles
@@ -830,5 +822,5 @@ app.router.lifespan_context = lifespan
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8080)
 
+    uvicorn.run(app, host="0.0.0.0", port=8080)

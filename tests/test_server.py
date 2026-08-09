@@ -44,11 +44,14 @@ class TestApiStatus:
         assert data["total"] == 0
 
     def test_status_running(self, client):
-        with patch.object(server_module, '_get_engine') as mock_get:
+        with patch.object(server_module, "_get_engine") as mock_get:
             mock_engine = MagicMock()
             mock_engine.get_status.return_value = {
-                "running": True, "processed": 5, "total": 10,
-                "currentImage": "photo.jpg", "progressPct": 50.0,
+                "running": True,
+                "processed": 5,
+                "total": 10,
+                "currentImage": "photo.jpg",
+                "progressPct": 50.0,
                 "stopRequested": False,
             }
             mock_engine.state.summary = None
@@ -62,7 +65,7 @@ class TestApiStatus:
 
 class TestApiStart:
     def test_start_no_running_session(self, client):
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
             f.write("root_directory: /tmp\nmodel:\n  base_url: http://test/v1\n  model_name: test\n")
             config_path = f.name
 
@@ -70,7 +73,7 @@ class TestApiStart:
         server_module.CONFIG_PATH = config_path
 
         try:
-            with patch('exif_tagger.server.PipelineEngine') as mock_engine_cls:
+            with patch("exif_tagger.server.PipelineEngine") as mock_engine_cls:
                 mock_instance = MagicMock()
                 mock_instance.state.running = False
                 mock_engine_cls.return_value = mock_instance
@@ -95,7 +98,7 @@ class TestApiStart:
 
 class TestApiStop:
     def test_stop_no_session(self, client):
-        with patch.object(server_module, '_get_engine') as mock_get:
+        with patch.object(server_module, "_get_engine") as mock_get:
             mock_engine = MagicMock()
             mock_engine.state.running = False
             mock_get.return_value = mock_engine
@@ -104,7 +107,7 @@ class TestApiStop:
             assert resp.status_code == 400
 
     def test_stop_with_session(self, client):
-        with patch.object(server_module, '_get_engine') as mock_get:
+        with patch.object(server_module, "_get_engine") as mock_get:
             mock_engine = MagicMock()
             mock_engine.state.running = True
             mock_engine.stop.return_value = {"status": "stopped", "processed": 10}
@@ -118,7 +121,7 @@ class TestApiStop:
 
 class TestApiConfig:
     def test_get_config(self, client):
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
             f.write("""root_directory: /tmp/images
 model:
   base_url: http://test/v1
@@ -154,27 +157,33 @@ class TestApiSchedules:
         assert data == []
 
     def test_create_schedule(self, client):
-        with patch.object(server_module, '_setup_scheduler'):
-            with patch.object(server_module, '_save_schedules'):
-                resp = client.post("/api/schedule", json={
-                    "name": "Daily scan",
-                    "folder": "/data/images",
-                    "interval_hours": 6,
-                    "enabled": True,
-                })
+        with patch.object(server_module, "_setup_scheduler"):
+            with patch.object(server_module, "_save_schedules"):
+                resp = client.post(
+                    "/api/schedule",
+                    json={
+                        "name": "Daily scan",
+                        "folder": "/data/images",
+                        "interval_hours": 6,
+                        "enabled": True,
+                    },
+                )
             assert resp.status_code == 200
             data = resp.json()
             assert "id" in data
 
     def test_delete_schedule(self, client):
-        with patch.object(server_module, '_setup_scheduler'):
-            with patch.object(server_module, '_save_schedules'):
+        with patch.object(server_module, "_setup_scheduler"):
+            with patch.object(server_module, "_save_schedules"):
                 # First create a schedule
-                resp = client.post("/api/schedule", json={
-                    "name": "Test",
-                    "folder": "/data/images",
-                    "interval_hours": 1,
-                })
+                resp = client.post(
+                    "/api/schedule",
+                    json={
+                        "name": "Test",
+                        "folder": "/data/images",
+                        "interval_hours": 1,
+                    },
+                )
                 sid = resp.json()["id"]
 
                 # Then delete it
@@ -199,7 +208,7 @@ class TestScheduleModel:
             ScheduleModel(
                 name="bad cron",
                 folder="/data/images",
-                cron_expression="invalid"  # Not 5 fields
+                cron_expression="invalid",  # Not 5 fields
             )
 
 
@@ -218,11 +227,7 @@ class TestComputeNextRun:
         assert 5.9 <= diff <= 7.0
 
     def test_cron_expression(self):
-        schedule = ScheduleModel(
-            name="daily",
-            folder="/data",
-            cron_expression="0 2 * * *"
-        )
+        schedule = ScheduleModel(name="daily", folder="/data", cron_expression="0 2 * * *")
         next_run = server_module._compute_next_run(schedule)
         assert next_run is not None
 
@@ -230,6 +235,7 @@ class TestComputeNextRun:
 class TestApiSuppressions:
     def test_get_and_delete_suppressions(self, client, tmp_path):
         from exif_tagger.db import get_connection, init_db, record_user_suppression
+
         db_file = tmp_path / "test_server_suppression.db"
         init_db(db_file)
 
@@ -245,7 +251,6 @@ class TestApiSuppressions:
                 image_id = cursor.lastrowid
         finally:
             conn.close()
-
 
         record_user_suppression(image_id=image_id, tag_name="false_tag", reason="manual_test", db_path=db_file)
 
@@ -266,6 +271,7 @@ class TestApiSuppressions:
 
 def test_get_schedules_file_path_data_dir(monkeypatch, tmp_path):
     from exif_tagger.server import get_schedules_file_path
+
     monkeypatch.delenv("EXIFTAGGER_SCHEDULES_FILE", raising=False)
     monkeypatch.setenv("EXIFTAGGER_DATA_DIR", str(tmp_path))
     assert get_schedules_file_path() == tmp_path / "schedules.json"
@@ -273,6 +279,7 @@ def test_get_schedules_file_path_data_dir(monkeypatch, tmp_path):
 
 def test_get_schedules_file_path_override(monkeypatch, tmp_path):
     from exif_tagger.server import get_schedules_file_path
+
     schedules_custom = tmp_path / "custom_schedules.json"
     monkeypatch.setenv("EXIFTAGGER_SCHEDULES_FILE", str(schedules_custom))
     monkeypatch.setenv("EXIFTAGGER_DATA_DIR", str(tmp_path / "ignored"))
@@ -281,7 +288,8 @@ def test_get_schedules_file_path_override(monkeypatch, tmp_path):
 
 class TestGalleryTask2Endpoints:
     def test_gallery_image_file_by_path(self, client, tmp_path):
-        from exif_tagger.models.schema import Config as SchemaConfig, ModelConfig
+        from exif_tagger.models.schema import Config as SchemaConfig
+        from exif_tagger.models.schema import ModelConfig
 
         # Create dummy image file
         img_file = tmp_path / "test_photo.jpg"
@@ -314,8 +322,9 @@ class TestGalleryTask2Endpoints:
             assert resp_ext.status_code == 400
 
     def test_gallery_sync_single_image_endpoint(self, client, tmp_path):
-        from exif_tagger.models.schema import Config as SchemaConfig, ModelConfig
         from exif_tagger.db import init_db
+        from exif_tagger.models.schema import Config as SchemaConfig
+        from exif_tagger.models.schema import ModelConfig
 
         db_file = tmp_path / "test_single_sync.db"
         init_db(db_file)
@@ -328,8 +337,10 @@ class TestGalleryTask2Endpoints:
             model=ModelConfig(base_url="http://test/v1", model_name="test"),
         )
 
-        with patch("exif_tagger.server.load_config", return_value=dummy_config), \
-             patch("exif_tagger.db.get_db_path", return_value=db_file):
+        with (
+            patch("exif_tagger.server.load_config", return_value=dummy_config),
+            patch("exif_tagger.db.get_db_path", return_value=db_file),
+        ):
             resp = client.post("/api/gallery/image/sync", json={"relative_path": "single_test.jpg"})
             assert resp.status_code == 200
             data = resp.json()
@@ -343,8 +354,10 @@ class TestGalleryTask2Endpoints:
 
     def test_gallery_sync_filtered_mode(self, client, tmp_path):
         import time
-        from exif_tagger.models.schema import Config as SchemaConfig, ModelConfig
+
         from exif_tagger.db import init_db
+        from exif_tagger.models.schema import Config as SchemaConfig
+        from exif_tagger.models.schema import ModelConfig
 
         db_file = tmp_path / "test_filtered_sync.db"
         init_db(db_file)
@@ -360,8 +373,10 @@ class TestGalleryTask2Endpoints:
             model=ModelConfig(base_url="http://test/v1", model_name="test"),
         )
 
-        with patch("exif_tagger.server.load_config", return_value=dummy_config), \
-             patch("exif_tagger.db.get_db_path", return_value=db_file):
+        with (
+            patch("exif_tagger.server.load_config", return_value=dummy_config),
+            patch("exif_tagger.db.get_db_path", return_value=db_file),
+        ):
             resp = client.post("/api/gallery/sync", json={"mode": "filtered", "folder": "sub"})
             assert resp.status_code == 200
             assert resp.json()["status"] == "started"
@@ -377,6 +392,3 @@ class TestGalleryTask2Endpoints:
             assert sdata["status"] == "complete"
             assert sdata["stats"]["total"] == 1
             assert sdata["stats"]["indexed"] == 1
-
-
-

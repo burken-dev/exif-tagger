@@ -26,7 +26,8 @@ class TestScanImages:
         (tmp_path / ".hidden.jpg").write_bytes(b"fake image data")
 
         images = scan_images(
-            tmp_path, exclude_patterns=["^\\."]  # Match files starting with dot
+            tmp_path,
+            exclude_patterns=["^\\."],  # Match files starting with dot
         )
         paths_str = {str(p) for p in images}
         assert not any(".hidden" in str(p) for p in images), (
@@ -39,13 +40,9 @@ class TestScanImages:
         (tmp_path / "thumbs_db").mkdir()
         Image.new("RGB", (50, 50)).save(tmp_path / "thumbs_db" / "thumb_01.jpg")
 
-        images = scan_images(
-            tmp_path, exclude_patterns=["thumbs?_?(db|cache)?/i?"]
-        )
+        images = scan_images(tmp_path, exclude_patterns=["thumbs?_?(db|cache)?/i?"])
         paths_str = {str(p) for p in images}
-        assert not any("thumbs_db" in str(p) for p in images), (
-            "Image inside thumbs_db should be excluded by pattern"
-        )
+        assert not any("thumbs_db" in str(p) for p in images), "Image inside thumbs_db should be excluded by pattern"
 
     def test_deterministic_order(self, sample_image_directory):
         """scanned list should be sorted alphabetically for deterministic processing."""

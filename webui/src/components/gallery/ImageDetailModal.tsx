@@ -17,7 +17,7 @@ interface ImageDetailModalProps {
   image: GalleryImage | null;
   open: boolean;
   onClose: () => void;
-  onUpdateTags: (imageId: number, tags: string[]) => Promise<{ success: boolean; error?: string }>;
+  onUpdateTags: (imageId: number | null, tags: string[]) => Promise<{ success: boolean; error?: string }>;
   allTags: string[];
 }
 
@@ -59,6 +59,7 @@ export const ImageDetailModal: React.FC<ImageDetailModalProps> = ({
   };
 
   const handleSaveTags = async () => {
+    if (!image) return;
     setIsSaving(true);
     try {
       const result = await onUpdateTags(image.id, tags);

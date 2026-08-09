@@ -5,7 +5,7 @@ import type { GalleryImage } from '@/types';
 interface ImageCardProps {
   image: GalleryImage;
   isSelected: boolean;
-  onToggleSelect: (id: number, checked?: boolean) => void;
+  onToggleSelect: (id: number | null, checked?: boolean) => void;
   onClick: (image: GalleryImage) => void;
 }
 

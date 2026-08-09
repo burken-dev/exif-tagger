@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button';
 interface ImageGridProps {
   images: GalleryImage[];
   selectedImageIds: Set<number>;
-  onToggleSelect: (id: number, checked?: boolean) => void;
+  onToggleSelect: (id: number | null, checked?: boolean) => void;
   onSelectAll: () => void;
   onDeselectAll: () => void;
   onImageClick: (image: GalleryImage) => void;
@@ -33,7 +33,7 @@ export const ImageGrid: React.FC<ImageGridProps> = ({
   isSyncing,
   onClearFilters,
 }) => {
-  const selectedOnPage = images.filter((img) => selectedImageIds.has(img.id)).length;
+  const selectedOnPage = images.filter((img) => img.id !== null && selectedImageIds.has(img.id)).length;
 
   return (
     <div className="space-y-3">
@@ -82,9 +82,9 @@ export const ImageGrid: React.FC<ImageGridProps> = ({
         <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
           {images.map((image) => (
             <ImageCard
-              key={image.id}
+              key={image.id ?? image.relative_path}
               image={image}
-              isSelected={selectedImageIds.has(image.id)}
+              isSelected={image.id !== null && selectedImageIds.has(image.id)}
               onToggleSelect={onToggleSelect}
               onClick={onImageClick}
             />

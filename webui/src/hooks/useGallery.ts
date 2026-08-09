@@ -184,7 +184,8 @@ export function useGallery() {
   }, []);
 
   // Selection actions
-  const toggleImageSelection = useCallback((id: number, checked?: boolean) => {
+  const toggleImageSelection = useCallback((id: number | null, checked?: boolean) => {
+    if (id === null) return;
     setSelectedImageIds((prev) => {
       const next = new Set(prev);
       const shouldSelect = checked !== undefined ? checked : !next.has(id);
@@ -200,7 +201,11 @@ export function useGallery() {
   const selectAllOnPage = useCallback(() => {
     setSelectedImageIds((prev) => {
       const next = new Set(prev);
-      images.forEach((img) => next.add(img.id));
+      images.forEach((img) => {
+        if (img.id !== null) {
+          next.add(img.id);
+        }
+      });
       return next;
     });
   }, [images]);
@@ -208,7 +213,11 @@ export function useGallery() {
   const deselectAllOnPage = useCallback(() => {
     setSelectedImageIds((prev) => {
       const next = new Set(prev);
-      images.forEach((img) => next.delete(img.id));
+      images.forEach((img) => {
+        if (img.id !== null) {
+          next.delete(img.id);
+        }
+      });
       return next;
     });
   }, [images]);
@@ -288,7 +297,10 @@ export function useGallery() {
 
   // Update single image tags
   const updateSingleImageTags = useCallback(
-    async (imageId: number, tags: string[]) => {
+    async (imageId: number | null, tags: string[]) => {
+      if (imageId === null) {
+        return { success: false, error: 'Cannot update tags on unindexed image' };
+      }
       try {
         const resp = await fetch(`/api/gallery/image/${imageId}/tags`, {
           method: 'PUT',
@@ -315,7 +327,11 @@ export function useGallery() {
   );
 
   // Fetch image detail (for modal)
-  const fetchImageDetail = useCallback(async (imageId: number) => {
+  const fetchImageDetail = useCallback(async (imageId: number | null) => {
+    if (imageId === null) {
+      setSelectedImageDetail(null);
+      return;
+    }
     try {
       const resp = await fetch(`/api/gallery/image/${imageId}`);
       if (!resp.ok) throw new Error('Image not found');
@@ -355,26 +371,64 @@ export function useGallery() {
   }, [fetchGalleryTags, fetchGalleryImages]);
 
   // Sync Gallery Index
-  const syncGalleryIndex = useCallback(async () => {
-    setIsSyncing(true);
-    try {
-      const resp = await fetch('/api/gallery/sync', { method: 'POST' });
-      if (!resp.ok) throw new Error('Sync failed');
-      const res = await resp.json();
+  const syncGalleryIndex = useCallback(
+    async (mode?: 'all' | 'filtered') => {
+      setIsSyncing(true);
+      try {
+        const resp = await fetch('/api/gallery/sync', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            mode,
+            folder: currentFolder,
+            search: searchQuery,
+            tags: Array.from(selectedTags),
+          }),
+        });
+        if (!resp.ok) throw new Error('Sync failed');
+        const res = await resp.json();
 
-      if (res.status === 'complete') {
+        if (res.status === 'complete') {
+          await fetchGalleryTags();
+          await fetchGalleryImages();
+          return { success: true, stats: res.stats || { total: 0, updated: 0 } };
+        }
+
+        return await pollSyncStatus();
+      } catch (err: any) {
+        return { success: false, error: err.message || 'Network error during sync' };
+      } finally {
+        setIsSyncing(false);
+      }
+    },
+    [currentFolder, searchQuery, selectedTags, fetchGalleryTags, fetchGalleryImages, pollSyncStatus]
+  );
+
+  // Sync Single Image
+  const syncSingleImage = useCallback(
+    async (relativePath: string) => {
+      try {
+        const resp = await fetch('/api/gallery/image/sync', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ relative_path: relativePath }),
+        });
+
+        if (!resp.ok) {
+          const errData = await resp.json().catch(() => ({}));
+          return { success: false, error: errData.detail || 'Failed to sync image' };
+        }
+
+        const data: GalleryImage = await resp.json();
         await fetchGalleryTags();
         await fetchGalleryImages();
-        return { success: true, stats: res.stats || { total: 0, updated: 0 } };
+        return { success: true, image: data };
+      } catch (err: any) {
+        return { success: false, error: err.message || 'Network error syncing image' };
       }
-
-      return await pollSyncStatus();
-    } catch (err: any) {
-      return { success: false, error: err.message || 'Network error during sync' };
-    } finally {
-      setIsSyncing(false);
-    }
-  }, [fetchGalleryTags, fetchGalleryImages, pollSyncStatus]);
+    },
+    [fetchGalleryTags, fetchGalleryImages]
+  );
 
   // Check initial sync status on mount if background sync is already running
   useEffect(() => {
@@ -440,6 +494,7 @@ export function useGallery() {
     fetchImageDetail,
     clearImageDetail,
     syncGalleryIndex,
+    syncSingleImage,
     setCurrentFolder: handleSetCurrentFolder,
     setModalFolder,
     setSearchQuery: handleSetSearchQuery,

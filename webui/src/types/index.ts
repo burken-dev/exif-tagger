@@ -1,9 +1,11 @@
 export interface GalleryImage {
-  id: number;
+  id: number | null;
   filename: string;
   relative_path: string;
   file_path?: string;
   tags: string[];
+  indexed: boolean;
+  last_modified?: number;
   created_at?: string;
   updated_at?: string;
 }

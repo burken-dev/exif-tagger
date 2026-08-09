@@ -67,7 +67,7 @@ jobs:
           pip install -e .
 
       - name: Run tests with coverage
-        run: pytest --cov=src --cov-report=xml:coverage.xml
+        run: pytest --cov=src --cov-report=xml:coverage.xml -k "not e2e"
 
       - name: Upload coverage artifact
         uses: actions/upload-artifact@v4

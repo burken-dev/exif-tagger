@@ -279,3 +279,104 @@ def test_get_schedules_file_path_override(monkeypatch, tmp_path):
     assert get_schedules_file_path() == schedules_custom
 
 
+class TestGalleryTask2Endpoints:
+    def test_gallery_image_file_by_path(self, client, tmp_path):
+        from exif_tagger.models.schema import Config as SchemaConfig, ModelConfig
+
+        # Create dummy image file
+        img_file = tmp_path / "test_photo.jpg"
+        img_file.write_bytes(b"\xff\xd8\xff\xe0\x00\x10JFIF\x00")
+
+        # Mock load_config to return tmp_path as root_directory
+        dummy_config = SchemaConfig(
+            root_directory=str(tmp_path),
+            model=ModelConfig(base_url="http://test/v1", model_name="test"),
+        )
+
+        with patch("exif_tagger.server.load_config", return_value=dummy_config):
+            # Test valid relative path
+            resp = client.get("/api/gallery/image/file?path=test_photo.jpg")
+            assert resp.status_code == 200
+            assert resp.content == b"\xff\xd8\xff\xe0\x00\x10JFIF\x00"
+
+            # Test path outside root_directory (security boundary)
+            resp_sec = client.get("/api/gallery/image/file?path=../outside.jpg")
+            assert resp_sec.status_code == 403
+
+            # Test file not found
+            resp_404 = client.get("/api/gallery/image/file?path=nonexistent.jpg")
+            assert resp_404.status_code == 404
+
+            # Test invalid extension
+            bad_file = tmp_path / "script.py"
+            bad_file.write_text("print('hello')")
+            resp_ext = client.get("/api/gallery/image/file?path=script.py")
+            assert resp_ext.status_code == 400
+
+    def test_gallery_sync_single_image_endpoint(self, client, tmp_path):
+        from exif_tagger.models.schema import Config as SchemaConfig, ModelConfig
+        from exif_tagger.db import init_db
+
+        db_file = tmp_path / "test_single_sync.db"
+        init_db(db_file)
+
+        img_file = tmp_path / "single_test.jpg"
+        img_file.write_bytes(b"\xff\xd8\xff\xe0\x00\x10JFIF\x00")
+
+        dummy_config = SchemaConfig(
+            root_directory=str(tmp_path),
+            model=ModelConfig(base_url="http://test/v1", model_name="test"),
+        )
+
+        with patch("exif_tagger.server.load_config", return_value=dummy_config), \
+             patch("exif_tagger.db.get_db_path", return_value=db_file):
+            resp = client.post("/api/gallery/image/sync", json={"relative_path": "single_test.jpg"})
+            assert resp.status_code == 200
+            data = resp.json()
+            assert data["indexed"] is True
+            assert data["relative_path"] == "single_test.jpg"
+            assert data["id"] is not None
+
+            # Test missing file
+            resp_missing = client.post("/api/gallery/image/sync", json={"relative_path": "missing.jpg"})
+            assert resp_missing.status_code == 404
+
+    def test_gallery_sync_filtered_mode(self, client, tmp_path):
+        import time
+        from exif_tagger.models.schema import Config as SchemaConfig, ModelConfig
+        from exif_tagger.db import init_db
+
+        db_file = tmp_path / "test_filtered_sync.db"
+        init_db(db_file)
+
+        # Create image files
+        sub_dir = tmp_path / "sub"
+        sub_dir.mkdir()
+        (tmp_path / "root_img.jpg").write_bytes(b"\xff\xd8\xff\xe0\x00\x10JFIF\x00")
+        (sub_dir / "sub_img.jpg").write_bytes(b"\xff\xd8\xff\xe0\x00\x10JFIF\x00")
+
+        dummy_config = SchemaConfig(
+            root_directory=str(tmp_path),
+            model=ModelConfig(base_url="http://test/v1", model_name="test"),
+        )
+
+        with patch("exif_tagger.server.load_config", return_value=dummy_config), \
+             patch("exif_tagger.db.get_db_path", return_value=db_file):
+            resp = client.post("/api/gallery/sync", json={"mode": "filtered", "folder": "sub"})
+            assert resp.status_code == 200
+            assert resp.json()["status"] == "started"
+
+            # Wait for background thread
+            for _ in range(20):
+                status_resp = client.get("/api/gallery/sync/status")
+                sdata = status_resp.json()
+                if sdata["status"] == "complete":
+                    break
+                time.sleep(0.1)
+
+            assert sdata["status"] == "complete"
+            assert sdata["stats"]["total"] == 1
+            assert sdata["stats"]["indexed"] == 1
+
+
+

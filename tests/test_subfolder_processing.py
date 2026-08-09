@@ -124,3 +124,58 @@ tags:
 
     assert summary.get("total_processed") == 1
 
+
+def test_validate_and_resolve_subfolder_root_inputs(tmp_path: Path):
+    from exif_tagger.main import validate_and_resolve_subfolder
+
+    root = tmp_path / "gallery"
+    root.mkdir()
+
+    # None, empty, slash, dot should all resolve to root with relative_subfolder = None
+    resolved_root, subfolder = validate_and_resolve_subfolder(None, root)
+    assert resolved_root == root.resolve()
+    assert subfolder is None
+
+    resolved_root, subfolder = validate_and_resolve_subfolder("", root)
+    assert subfolder is None
+
+    resolved_root, subfolder = validate_and_resolve_subfolder("/", root)
+    assert subfolder is None
+
+    resolved_root, subfolder = validate_and_resolve_subfolder(".", root)
+    assert subfolder is None
+
+
+def test_validate_and_resolve_subfolder_valid_relative(tmp_path: Path):
+    from exif_tagger.main import validate_and_resolve_subfolder
+
+    root = tmp_path / "gallery"
+    sub = root / "vacation" / "2026"
+    sub.mkdir(parents=True)
+
+    # Leading slash should be stripped and treated relative to root
+    resolved_root, subfolder = validate_and_resolve_subfolder("/vacation/2026", root)
+    assert resolved_root == root.resolve()
+    assert subfolder == "vacation/2026"
+
+    # Without leading slash
+    resolved_root, subfolder = validate_and_resolve_subfolder("vacation/2026", root)
+    assert resolved_root == root.resolve()
+    assert subfolder == "vacation/2026"
+
+
+def test_validate_and_resolve_subfolder_breakout_attempts(tmp_path: Path):
+    import pytest
+    from exif_tagger.main import validate_and_resolve_subfolder
+
+    root = tmp_path / "gallery"
+    root.mkdir()
+
+    bad_paths = ["../../etc/passwd", "/../outside", "../", "/../etc/passwd"]
+    for bad_path in bad_paths:
+        with pytest.raises(ValueError) as exc_info:
+            validate_and_resolve_subfolder(bad_path, root)
+        assert f"Requested path '{bad_path}' is outside the root image directory." in str(exc_info.value)
+
+
+

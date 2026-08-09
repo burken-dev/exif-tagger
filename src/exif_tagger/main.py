@@ -94,6 +94,37 @@ def _format_summary_text(summary: dict) -> str:
     return "\n".join(lines)
 
 
+def validate_and_resolve_subfolder(user_path: str | None, base_gallery_root: Path) -> tuple[Path, str | None]:
+    """
+    Validates user_path against base_gallery_root to ensure path traversal breakout is impossible.
+
+    Treats all user_paths (even absolute-looking ones like '/vacation') as relative to base_gallery_root.
+    Returns (resolved_base_gallery_root, relative_subfolder_str_or_none).
+    Raises ValueError if requested path resolves outside base_gallery_root.
+    """
+    resolved_root = base_gallery_root.resolve()
+    if user_path is None:
+        return resolved_root, None
+
+    raw_str = str(user_path).strip()
+    if not raw_str or raw_str == ".":
+        return resolved_root, None
+
+    # Replace backslashes and strip leading/trailing slashes
+    clean_rel = raw_str.replace("\\", "/").strip("/")
+    if not clean_rel or clean_rel == ".":
+        return resolved_root, None
+
+    candidate = (resolved_root / clean_rel).resolve()
+    try:
+        rel = candidate.relative_to(resolved_root)
+        if rel.as_posix() == ".":
+            return resolved_root, None
+        return resolved_root, rel.as_posix()
+    except ValueError:
+        raise ValueError(f"Requested path '{user_path}' is outside the root image directory.")
+
+
 class StateLoggingHandler(logging.Handler):
     """Logging handler that routes logs to ProcessingState."""
 

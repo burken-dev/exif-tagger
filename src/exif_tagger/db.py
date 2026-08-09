@@ -161,7 +161,14 @@ def sync_gallery_index(
             existing_db_map = {row["file_path"]: row for row in existing_rows}
 
             for db_file_path, row in existing_db_map.items():
-                if db_file_path not in scanned_map or not Path(db_file_path).exists():
+                db_p = Path(db_file_path)
+                try:
+                    db_p.relative_to(root)
+                    is_under_root = True
+                except ValueError:
+                    is_under_root = False
+
+                if (is_under_root and db_file_path not in scanned_map) or not db_p.exists():
                     conn.execute("DELETE FROM images WHERE id = ?", (row["id"],))
                     deleted_count += 1
 
@@ -336,8 +343,7 @@ def get_gallery_images(
             if search_pattern:
                 if has_glob:
                     if not (
-                        fnmatch.fnmatch(fname.lower(), search_pattern)
-                        or fnmatch.fnmatch(rel_p.lower(), search_pattern)
+                        fnmatch.fnmatch(fname.lower(), search_pattern) or fnmatch.fnmatch(rel_p.lower(), search_pattern)
                     ):
                         continue
                 else:
@@ -965,8 +971,8 @@ def get_unevaluated_candidates(
         if subfolder:
             clean_sub = subfolder.strip().strip("/").lower()
             if clean_sub and clean_sub != ".":
-                query_sql += " WHERE LOWER(relative_path) LIKE ?"
-                params.append(f"{clean_sub}/%")
+                query_sql += " WHERE (LOWER(relative_path) LIKE ? OR LOWER(relative_path) = ?)"
+                params.extend([f"{clean_sub}/%", clean_sub])
 
         query_sql += " ORDER BY id ASC"
         rows = conn.execute(query_sql, params).fetchall()

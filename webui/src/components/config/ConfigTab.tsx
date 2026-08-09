@@ -56,7 +56,7 @@ const defaultConfig: AppConfig = {
     api_key: '',
     use_structured_outputs: true,
     max_image_dimension: 720,
-    image_format: 'webp',
+    image_format: 'jpeg',
     image_quality: 80,
     concurrency: 1,
     params: {
@@ -480,7 +480,7 @@ export const ConfigTab: React.FC = () => {
                       }))
                     }
                     className={`flex-1 transition-colors font-medium uppercase text-xs tracking-wide ${
-                      (formData.model?.image_format ?? 'webp') === fmt
+                      (formData.model?.image_format ?? 'jpeg') === fmt
                         ? 'bg-primary text-primary-foreground'
                         : 'bg-transparent text-muted-foreground hover:text-foreground hover:bg-accent'
                     }`}

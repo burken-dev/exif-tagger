@@ -24,7 +24,7 @@ from pydantic import BaseModel
 
 from exif_tagger.ai_client import SecretRedactor, setup_secure_logging
 from exif_tagger.config import get_config_path, load_config
-from exif_tagger.main import PipelineEngine
+from exif_tagger.main import PipelineEngine, validate_and_resolve_subfolder
 from exif_tagger.models.schema import IMAGE_EXTENSIONS, ScheduleModel, TagDefinition
 
 logger = logging.getLogger(__name__)
@@ -241,6 +241,14 @@ def api_start(req: StartRequest):
         if _engine and _engine.state.running:
             raise HTTPException(status_code=409, detail="A processing session is already running")
 
+        engine = _get_engine()
+        config = engine._load_config()
+        base_gallery_root = Path(config.root_directory).resolve()
+        try:
+            validate_and_resolve_subfolder(req.rootDirectory, base_gallery_root)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+
         _engine = PipelineEngine(config_path=CONFIG_PATH, verbose=True)
 
     def run_session():
@@ -251,8 +259,7 @@ def api_start(req: StartRequest):
 
     thread = threading.Thread(target=run_session, daemon=True)
     thread.start()
-
-    return {"sessionId": str(uuid.uuid4()), "status": "started"}
+    return {"status": "started"}
 
 
 @app.post("/api/stop")

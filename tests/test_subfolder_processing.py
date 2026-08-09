@@ -3,11 +3,14 @@
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+from fastapi.testclient import TestClient
 from PIL import Image
 
 from exif_tagger.db import get_connection, get_gallery_folders, sync_gallery_index
 from exif_tagger.main import PipelineEngine
 from exif_tagger.models.schema import TaggingResponse, TagResult
+from exif_tagger.server import app
 
 
 def create_test_image(path: Path):
@@ -119,8 +122,120 @@ tags:
 
     with patch("exif_tagger.ai_client.tag_image_with_ai") as mock_ai:
         mock_ai.return_value = mock_res
-        # Pass root_directory with a leading slash e.g. "/folder1"
-        summary = engine.start_session(root_directory="/folder1")
+        # Pass root_directory with absolute subfolder path e.g. str(sub1)
+        summary = engine.start_session(root_directory=str(sub1))
 
     assert summary.get("total_processed") == 1
+
+
+def test_validate_and_resolve_subfolder_root_inputs(tmp_path: Path):
+    from exif_tagger.main import validate_and_resolve_subfolder
+
+    root = tmp_path / "gallery"
+    root.mkdir()
+
+    # None, empty, slash, dot should all resolve to root with relative_subfolder = None
+    resolved_root, subfolder = validate_and_resolve_subfolder(None, root)
+    assert resolved_root == root.resolve()
+    assert subfolder is None
+
+    resolved_root, subfolder = validate_and_resolve_subfolder("", root)
+    assert subfolder is None
+
+    resolved_root, subfolder = validate_and_resolve_subfolder("/", root)
+    assert subfolder is None
+
+    resolved_root, subfolder = validate_and_resolve_subfolder(".", root)
+    assert subfolder is None
+
+
+def test_validate_and_resolve_subfolder_valid_relative(tmp_path: Path):
+    from exif_tagger.main import validate_and_resolve_subfolder
+
+    root = tmp_path / "gallery"
+    sub = root / "vacation" / "2026"
+    sub.mkdir(parents=True)
+
+    # Absolute path inside root
+    resolved_root, subfolder = validate_and_resolve_subfolder(str(sub), root)
+    assert resolved_root == root.resolve()
+    assert subfolder == "vacation/2026"
+
+    # Without leading slash (relative path)
+    resolved_root, subfolder = validate_and_resolve_subfolder("vacation/2026", root)
+    assert resolved_root == root.resolve()
+    assert subfolder == "vacation/2026"
+
+
+def test_validate_and_resolve_subfolder_breakout_attempts(tmp_path: Path):
+    from exif_tagger.main import validate_and_resolve_subfolder
+
+    root = tmp_path / "gallery"
+    root.mkdir()
+
+    bad_paths = ["../../etc/passwd", "/../outside", "../", "/../etc/passwd", "/etc/passwd"]
+    for bad_path in bad_paths:
+        with pytest.raises(ValueError) as exc_info:
+            validate_and_resolve_subfolder(bad_path, root)
+        assert f"Requested path '{bad_path}' is outside the root image directory." in str(exc_info.value)
+
+
+def test_api_start_rejects_path_traversal(tmp_path: Path, monkeypatch):
+    import exif_tagger.server as server_module
+
+    client = TestClient(app)
+
+    engine = server_module._get_engine()
+    mock_config = type(
+        "Config",
+        (),
+        {
+            "root_directory": str(tmp_path),
+            "validate": lambda self: None,
+            "validate_exclude_patterns": lambda self: None,
+            "log_level": "INFO",
+            "log_dir": str(tmp_path / "logs"),
+        },
+    )()
+    monkeypatch.setattr(engine, "_load_config", lambda: mock_config)
+
+    # Attempt path traversal breakout via API
+    resp = client.post("/api/start", json={"rootDirectory": "../../etc/passwd"})
+    assert resp.status_code == 400
+    assert "is outside the root image directory" in resp.json()["detail"]
+
+    resp2 = client.post("/api/start", json={"rootDirectory": "/etc/passwd"})
+    assert resp2.status_code == 400
+    assert resp2.json()["detail"] == "Requested path '/etc/passwd' is outside the root image directory."
+
+
+def test_pipeline_engine_start_session_scoping(tmp_path: Path, monkeypatch):
+    root = tmp_path / "gallery"
+    root.mkdir()
+    (root / "img.jpg").touch()
+    sub = root / "subfolder"
+    sub.mkdir()
+    (sub / "sub_img.jpg").touch()
+
+    # Engine start_session with path traversal should fail validation
+    engine = PipelineEngine(config_path="config.yaml")
+    mock_config = type(
+        "Config",
+        (),
+        {
+            "root_directory": str(root),
+            "validate": lambda self: None,
+            "validate_exclude_patterns": lambda self: None,
+            "log_level": "INFO",
+            "log_dir": str(tmp_path / "logs"),
+        },
+    )()
+    monkeypatch.setattr(engine, "_load_config", lambda: mock_config)
+
+    with pytest.raises(ValueError) as exc_info:
+        engine.start_session(root_directory="../../etc/passwd")
+    assert "outside the root image directory" in str(exc_info.value)
+
+
+
 

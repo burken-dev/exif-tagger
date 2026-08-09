@@ -70,12 +70,15 @@ class TestApiStart:
             config_path = f.name
 
         original_config = server_module.CONFIG_PATH
+        original_engine = server_module._engine
         server_module.CONFIG_PATH = config_path
+        server_module._engine = None
 
         try:
             with patch("exif_tagger.server.PipelineEngine") as mock_engine_cls:
                 mock_instance = MagicMock()
                 mock_instance.state.running = False
+                mock_instance._load_config.return_value.root_directory = "/tmp"
                 mock_engine_cls.return_value = mock_instance
 
                 resp = client.post("/api/start", json={"rootDirectory": "/tmp/images", "maxImages": 50})
@@ -84,6 +87,7 @@ class TestApiStart:
                 assert data["status"] == "started"
         finally:
             server_module.CONFIG_PATH = original_config
+            server_module._engine = original_engine
             os.unlink(config_path)
 
     def test_start_already_running(self, client):

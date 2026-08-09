@@ -1,5 +1,6 @@
 import tempfile
 from pathlib import Path
+
 from PIL import Image
 
 import exif_tagger  # noqa: F401
@@ -42,7 +43,9 @@ def test_heic_exif_write_and_read():
 
 def test_heic_gallery_image_file_conversion(tmp_path, monkeypatch):
     import io
+
     from fastapi.testclient import TestClient
+
     from exif_tagger.server import app
 
     test_heic = tmp_path / "test_sample.heic"
@@ -67,7 +70,9 @@ def test_heic_gallery_image_file_conversion(tmp_path, monkeypatch):
 
 def test_heic_gallery_image_file_by_id_conversion(tmp_path, monkeypatch):
     import io
+
     from fastapi.testclient import TestClient
+
     from exif_tagger.server import app
 
     test_heic = tmp_path / "test_sample2.heic"

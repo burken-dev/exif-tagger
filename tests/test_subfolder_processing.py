@@ -181,7 +181,23 @@ def test_validate_and_resolve_subfolder_breakout_attempts(tmp_path: Path):
 
 
 def test_api_start_rejects_path_traversal(tmp_path: Path, monkeypatch):
+    import exif_tagger.server as server_module
+
     client = TestClient(app)
+
+    engine = server_module._get_engine()
+    mock_config = type(
+        "Config",
+        (),
+        {
+            "root_directory": str(tmp_path),
+            "validate": lambda self: None,
+            "validate_exclude_patterns": lambda self: None,
+            "log_level": "INFO",
+            "log_dir": str(tmp_path / "logs"),
+        },
+    )()
+    monkeypatch.setattr(engine, "_load_config", lambda: mock_config)
 
     # Attempt path traversal breakout via API
     resp = client.post("/api/start", json={"rootDirectory": "../../etc/passwd"})

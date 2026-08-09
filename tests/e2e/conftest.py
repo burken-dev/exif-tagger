@@ -1,7 +1,7 @@
 """E2E test fixtures: server lifecycle and Playwright browser.
 
-The exif-tagger app is served by the FastAPI server on port 8000, which
-handles both the API (/api/*) and the static web UI (/, /css/style.css,
+The exif-tagger app is served by the FastAPI server on port 9100 (or E2E_SERVER_URL),
+which handles both the API (/api/*) and the static web UI (/, /css/style.css,
 /js/app.js).  There is no separate frontend dev server needed for E2E
 testing.
 
@@ -10,10 +10,10 @@ Usage:
     pytest tests/e2e/ -v -s               # with live stdout for debugging
 
 The `dev_server` fixture (session-scoped) starts the FastAPI backend if
-port 8000 is not already occupied.
+port 9100 is not already occupied.
 
 The `browser_page` fixture (function-scoped) opens a headless Chromium page
-at http://localhost:8000 and auto-saves screenshots at start, end, and on failure.
+at E2E_SERVER_URL and auto-saves screenshots at start, end, and on failure.
 """
 
 from __future__ import annotations
@@ -23,6 +23,7 @@ import socket
 import subprocess
 import time
 from pathlib import Path
+from urllib.parse import urlparse
 
 # ---------------------------------------------------------------------------
 # Chromium system library path (no-sudo workaround for minimal Docker images)
@@ -53,7 +54,7 @@ from playwright.sync_api import Page, sync_playwright
 ROOT = Path(__file__).parent.parent.parent          # repo root
 SCREENSHOTS_DIR = Path(__file__).parent / "screenshots"
 
-SERVER_URL = "http://localhost:8000"   # FastAPI serves both API and static UI
+SERVER_URL = os.environ.get("E2E_SERVER_URL", "http://localhost:9100")
 
 
 # ---------------------------------------------------------------------------
@@ -130,15 +131,19 @@ def dev_server():
 
     procs: list[subprocess.Popen] = []
 
+    parsed = urlparse(SERVER_URL)
+    host = parsed.hostname or "localhost"
+    port = parsed.port or 9100
+
     # --- Backend (uvicorn) ---
-    already_up = _port_open("localhost", 8000)
+    already_up = _port_open(host, port)
     if not already_up:
         proc = subprocess.Popen(
             [
                 str(ROOT / ".venv/bin/uvicorn"),
                 "src.exif_tagger.server:app",
                 "--host", "0.0.0.0",
-                "--port", "8000",
+                "--port", str(port),
             ],
             cwd=str(ROOT),
             env=env,

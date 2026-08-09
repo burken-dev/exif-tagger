@@ -22,12 +22,7 @@ def test_init_db_creates_new_tables(tmp_path: Path):
 
     conn = get_connection(db_file)
     try:
-        tables = {
-            row["name"]
-            for row in conn.execute(
-                "SELECT name FROM sqlite_master WHERE type='table'"
-            ).fetchall()
-        }
+        tables = {row["name"] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
         assert "images" in tables
         assert "image_tags" in tables
         assert "tag_definitions" in tables
@@ -35,10 +30,7 @@ def test_init_db_creates_new_tables(tmp_path: Path):
         assert "user_suppressions" in tables
 
         # Verify image_tags has source column
-        columns = {
-            row["name"]
-            for row in conn.execute("PRAGMA table_info(image_tags)").fetchall()
-        }
+        columns = {row["name"] for row in conn.execute("PRAGMA table_info(image_tags)").fetchall()}
         assert "source" in columns
         assert "added_at" in columns
     finally:
@@ -227,7 +219,6 @@ def test_evaluate_thresholds_locally(tmp_path: Path):
 
     sync_gallery_index(root_directory=root, db_path=db_file)
 
-
     conn = get_connection(db_file)
     try:
         row = conn.execute("SELECT id FROM images WHERE filename='img.jpg'").fetchone()
@@ -318,6 +309,7 @@ def test_sync_gallery_index_detects_manual_exif_removal(tmp_path: Path):
     # Update mtime slightly to force re-sync
     mtime = img1.stat().st_mtime + 5.0
     import os
+
     os.utime(img1, (mtime, mtime))
 
     # Second sync
@@ -333,4 +325,3 @@ def test_sync_gallery_index_detects_manual_exif_removal(tmp_path: Path):
         assert sup_row is not None
     finally:
         conn.close()
-

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Image as ImageIcon, Tag as TagIcon, X, Plus, Save, FileText } from 'lucide-react';
+import { Image as ImageIcon, Tag as TagIcon, X, Plus, Save, FileText, RefreshCw } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -17,7 +17,8 @@ interface ImageDetailModalProps {
   image: GalleryImage | null;
   open: boolean;
   onClose: () => void;
-  onUpdateTags: (imageId: number, tags: string[]) => Promise<{ success: boolean; error?: string }>;
+  onUpdateTags: (imageId: number | null, tags: string[]) => Promise<{ success: boolean; error?: string }>;
+  onSyncSingleImage?: (relativePath: string) => Promise<{ success: boolean; image?: GalleryImage; error?: string }>;
   allTags: string[];
 }
 
@@ -26,11 +27,13 @@ export const ImageDetailModal: React.FC<ImageDetailModalProps> = ({
   open,
   onClose,
   onUpdateTags,
+  onSyncSingleImage,
   allTags,
 }) => {
   const [tags, setTags] = useState<string[]>([]);
   const [newTagInput, setNewTagInput] = useState('');
   const [isSaving, setIsSaving] = useState(false);
+  const [isSyncingSingle, setIsSyncingSingle] = useState(false);
   const { showToast } = useToast();
 
   useEffect(() => {
@@ -58,10 +61,45 @@ export const ImageDetailModal: React.FC<ImageDetailModalProps> = ({
     }
   };
 
+  const handleSyncImage = async () => {
+    if (!image || !onSyncSingleImage) return;
+    setIsSyncingSingle(true);
+    try {
+      const res = await onSyncSingleImage(image.relative_path);
+      if (res.success && res.image) {
+        showToast('Image synced successfully', 'success');
+        setTags(res.image.tags || []);
+      } else {
+        showToast(res.error || 'Failed to sync image', 'error');
+      }
+    } catch (err: any) {
+      showToast(err.message || 'Error syncing image', 'error');
+    } finally {
+      setIsSyncingSingle(false);
+    }
+  };
+
   const handleSaveTags = async () => {
+    if (!image) return;
     setIsSaving(true);
     try {
-      const result = await onUpdateTags(image.id, tags);
+      let targetId = image.id;
+      if (!image.indexed || targetId === null) {
+        if (!onSyncSingleImage) {
+          showToast('Single image sync function not provided', 'error');
+          setIsSaving(false);
+          return;
+        }
+        const syncRes = await onSyncSingleImage(image.relative_path);
+        if (!syncRes.success || !syncRes.image || syncRes.image.id === null) {
+          showToast(syncRes.error || 'Failed to auto-index image before saving tags', 'error');
+          setIsSaving(false);
+          return;
+        }
+        targetId = syncRes.image.id;
+      }
+
+      const result = await onUpdateTags(targetId, tags);
       if (result.success) {
         showToast('Image tags updated successfully', 'success');
       } else {
@@ -92,7 +130,7 @@ export const ImageDetailModal: React.FC<ImageDetailModalProps> = ({
           {/* Left: Image Preview (2 Columns on MD) */}
           <div className="md:col-span-2 flex flex-col items-center justify-center bg-black/40 rounded-lg p-2 min-h-[300px] border border-border">
             <img
-              src={`/api/gallery/image/${image.id}/file`}
+              src={`/api/gallery/image/file?path=${encodeURIComponent(image.relative_path)}`}
               alt={image.filename}
               className="max-h-[60vh] w-auto max-w-full object-contain rounded"
             />
@@ -185,15 +223,26 @@ export const ImageDetailModal: React.FC<ImageDetailModalProps> = ({
 
             {/* EXIF Metadata Table/Details */}
             <div className="p-3.5 rounded-lg border border-border bg-card space-y-2.5">
-              <h3 className="text-sm font-semibold flex items-center gap-2">
-                <FileText className="w-4 h-4 text-primary" />
-                File & EXIF Info
-              </h3>
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-semibold flex items-center gap-2">
+                  <FileText className="w-4 h-4 text-primary" />
+                  File & EXIF Info
+                </h3>
+                {image.indexed ? (
+                  <Badge variant="outline" className="bg-emerald-500/10 text-emerald-400 border-emerald-500/30 text-xs">
+                    Indexed
+                  </Badge>
+                ) : (
+                  <Badge variant="outline" className="bg-amber-500/10 text-amber-400 border-amber-500/30 text-xs">
+                    Unindexed
+                  </Badge>
+                )}
+              </div>
 
               <div className="space-y-2 text-xs divide-y divide-border/40">
                 <div className="flex justify-between pt-1">
                   <span className="text-muted-foreground">ID:</span>
-                  <span className="font-mono text-foreground">{image.id}</span>
+                  <span className="font-mono text-foreground">{image.id ?? 'None (Unindexed)'}</span>
                 </div>
                 <div className="flex justify-between pt-1">
                   <span className="text-muted-foreground">Filename:</span>
@@ -224,6 +273,22 @@ export const ImageDetailModal: React.FC<ImageDetailModalProps> = ({
                   </div>
                 )}
               </div>
+
+              {onSyncSingleImage && (
+                <div className="pt-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={handleSyncImage}
+                    disabled={isSyncingSingle}
+                    className="w-full text-xs h-8 gap-1.5 text-amber-400 border-amber-500/40 hover:bg-amber-500/10"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${isSyncingSingle ? 'animate-spin' : ''}`} />
+                    <span>{isSyncingSingle ? 'Syncing...' : 'Sync Image & Extract Tags'}</span>
+                  </Button>
+                </div>
+              )}
             </div>
           </div>
         </div>

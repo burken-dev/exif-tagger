@@ -18,13 +18,16 @@ def test_vision_api_error_logging_dumps_request_and_response(caplog, tmp_path):
 
     fake_error = APIError(
         message="Invalid prompt",
-        request=MagicMock(url="https://api.openai.com/v1/chat/completions", headers={"Authorization": "Bearer sk-secretkey1234567890"}),
-        body={"error": "Invalid prompt"}
+        request=MagicMock(
+            url="https://api.openai.com/v1/chat/completions", headers={"Authorization": "Bearer sk-secretkey1234567890"}
+        ),
+        body={"error": "Invalid prompt"},
     )
     fake_error.response = mock_response
 
     test_img = tmp_path / "test.jpg"
     from PIL import Image
+
     Image.new("RGB", (100, 100)).save(test_img)
 
     model_config = ModelConfig(

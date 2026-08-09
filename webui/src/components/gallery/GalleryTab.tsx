@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Image as ImageIcon, SlidersHorizontal, RefreshCw, Info } from 'lucide-react';
+import { Image as ImageIcon, SlidersHorizontal, RefreshCw, Filter, Info } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { useGallery } from '@/hooks/useGallery';
@@ -44,6 +44,7 @@ export const GalleryTab: React.FC = () => {
     fetchImageDetail,
     clearImageDetail,
     syncGalleryIndex,
+    syncSingleImage,
     setCurrentFolder,
     setSearchQuery,
     setCurrentPage,
@@ -54,17 +55,20 @@ export const GalleryTab: React.FC = () => {
   const [isFolderModalOpen, setIsFolderModalOpen] = useState(false);
   const [showManagementPanels, setShowManagementPanels] = useState(true);
 
+  const hasActiveFilters = Boolean(currentFolder || searchQuery || selectedTags.size > 0);
+
   const handleOpenFolderModal = () => {
     fetchFolders(currentFolder || '');
     setIsFolderModalOpen(true);
   };
 
-  const handleSyncIndex = async () => {
-    showToast('Syncing gallery index with disk...', 'info');
-    const res = await syncGalleryIndex();
+  const handleSyncIndex = async (mode: 'all' | 'filtered' = 'all') => {
+    const label = mode === 'filtered' ? 'filtered gallery index' : 'gallery index';
+    showToast(`Syncing ${label}...`, 'info');
+    const res = await syncGalleryIndex(mode);
     if (res.success) {
       showToast(
-        `Gallery index sync complete! Total: ${res.stats?.total || 0}, Updated: ${res.stats?.updated || 0}`,
+        `Gallery sync complete! Total: ${res.stats?.total || 0}, Updated: ${res.stats?.updated || 0}`,
         'success'
       );
     } else {
@@ -88,18 +92,45 @@ export const GalleryTab: React.FC = () => {
               </CardDescription>
             </div>
 
-            <div className="flex items-center gap-2 self-start sm:self-auto">
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={handleSyncIndex}
-                disabled={isSyncing}
-                className="flex items-center gap-2 shrink-0 h-9"
-              >
-                <RefreshCw className={`w-4 h-4 ${isSyncing ? 'animate-spin text-primary' : ''}`} />
-                <span>{isSyncing ? 'Syncing...' : 'Sync Index'}</span>
-              </Button>
+            <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto">
+              <div className="inline-flex rounded-md shadow-sm border border-border bg-card p-0.5">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => handleSyncIndex('all')}
+                  disabled={isSyncing}
+                  className="h-8 text-xs px-2.5 gap-1.5 rounded-r-none font-medium hover:bg-muted"
+                  title="Sync all images in library"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin text-primary' : ''}`} />
+                  <span>Sync All</span>
+                </Button>
+                <div className="w-[1px] bg-border my-1" />
+                <Button
+                  type="button"
+                  variant={hasActiveFilters ? 'default' : 'ghost'}
+                  size="sm"
+                  onClick={() => handleSyncIndex('filtered')}
+                  disabled={isSyncing}
+                  className={`h-8 text-xs px-2.5 gap-1.5 rounded-l-none font-medium ${
+                    hasActiveFilters
+                      ? 'bg-amber-500 hover:bg-amber-600 text-amber-950 font-semibold shadow-sm'
+                      : 'text-muted-foreground hover:bg-muted'
+                  }`}
+                  title={
+                    hasActiveFilters
+                      ? 'Sync images matching current folder, search query, or tag filters'
+                      : 'Sync filtered images'
+                  }
+                >
+                  <Filter className="w-3.5 h-3.5" />
+                  <span>Sync Filtered</span>
+                  {hasActiveFilters && (
+                    <span className="w-1.5 h-1.5 rounded-full bg-amber-950 animate-pulse" />
+                  )}
+                </Button>
+              </div>
 
               <Button
                 type="button"
@@ -123,7 +154,7 @@ export const GalleryTab: React.FC = () => {
               <div>
                 <p className="font-semibold text-indigo-100">No images indexed yet</p>
                 <p className="text-xs text-indigo-200/80 mt-0.5">
-                  Click <strong>Sync Index</strong> in the top right header to scan your library directory and populate the gallery index.
+                  Click <strong>Sync All</strong> or <strong>Sync Filtered</strong> in the top right header to scan your library directory and populate the gallery index.
                 </p>
               </div>
             </div>
@@ -140,6 +171,9 @@ export const GalleryTab: React.FC = () => {
           <GalleryToolbar
             searchQuery={searchQuery}
             onSearchChange={setSearchQuery}
+            onSync={handleSyncIndex}
+            isSyncing={isSyncing}
+            hasActiveFilters={hasActiveFilters}
           />
 
           {/* Active Tag Filter Badges */}
@@ -179,11 +213,11 @@ export const GalleryTab: React.FC = () => {
             onToggleSelect={toggleImageSelection}
             onSelectAll={selectAllOnPage}
             onDeselectAll={deselectAllOnPage}
-            onImageClick={(img) => fetchImageDetail(img.id)}
+            onImageClick={(img) => fetchImageDetail(img.id !== null ? img.id : img)}
             loading={loading}
             totalImages={totalImages}
-            hasActiveFilters={Boolean(searchQuery || selectedTags.size > 0 || currentFolder)}
-            onSync={handleSyncIndex}
+            hasActiveFilters={hasActiveFilters}
+            onSync={() => handleSyncIndex('all')}
             isSyncing={isSyncing}
             onClearFilters={() => {
               clearTagFilters();
@@ -220,6 +254,7 @@ export const GalleryTab: React.FC = () => {
         open={selectedImageDetail !== null}
         onClose={clearImageDetail}
         onUpdateTags={updateSingleImageTags}
+        onSyncSingleImage={syncSingleImage}
         allTags={allTags}
       />
     </div>

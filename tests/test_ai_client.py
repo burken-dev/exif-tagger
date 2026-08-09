@@ -20,12 +20,8 @@ class TestBuildPrompt:
 
     def test_includes_all_tags(self):
         tags = {
-            "landscape": TagDefinition(
-                description="Natural scenery", threshold=0.7
-            ),
-            "portrait": TagDefinition(
-                description="Person face visible", threshold=0.8
-            ),
+            "landscape": TagDefinition(description="Natural scenery", threshold=0.7),
+            "portrait": TagDefinition(description="Person face visible", threshold=0.8),
         }
 
         prompt = _build_prompt(tags)
@@ -61,12 +57,14 @@ class TestParseResponse:
     """Test parsing of AI response strings to TaggingResponse."""
 
     def test_valid_json_response(self):
-        response_str = json.dumps({
-            "results": [
-                {"tag_name": "landscape", "score": 0.95, "reason": "Mountains visible"},
-                {"tag_name": "portrait", "score": 0.2, "reason": "No faces seen"},
-            ]
-        })
+        response_str = json.dumps(
+            {
+                "results": [
+                    {"tag_name": "landscape", "score": 0.95, "reason": "Mountains visible"},
+                    {"tag_name": "portrait", "score": 0.2, "reason": "No faces seen"},
+                ]
+            }
+        )
 
         result = _parse_response(response_str)
         assert len(result.results) == 2
@@ -92,6 +90,7 @@ class TestParseResponse:
     def test_invalid_json_logs_error_and_raises_value_error(self, caplog):
         """When JSON is invalid, logger.error should record the JSONDecodeError details and attempted text."""
         import logging
+
         with caplog.at_level(logging.ERROR):
             with pytest.raises(ValueError, match="did not return valid JSON"):
                 _parse_response("This is not JSON at all!!")
@@ -121,13 +120,15 @@ class TestParseResponse:
 
     def test_score_clamped_to_valid_range(self):
         """Scores outside 0-1 should be clamped."""
-        response_str = json.dumps({
-            "results": [
-                {"tag_name": "test", "score": -0.5},   # Clamped to 0
-                {"tag_name": "test2", "score": 1.5},    # Clamped to 1
-                {"tag_name": "test3", "score": 0.5},    # Unchanged
-            ]
-        })
+        response_str = json.dumps(
+            {
+                "results": [
+                    {"tag_name": "test", "score": -0.5},  # Clamped to 0
+                    {"tag_name": "test2", "score": 1.5},  # Clamped to 1
+                    {"tag_name": "test3", "score": 0.5},  # Unchanged
+                ]
+            }
+        )
         result = _parse_response(response_str)
         assert result.results[0].score == 0.0
         assert result.results[1].score == 1.0

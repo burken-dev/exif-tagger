@@ -6,7 +6,9 @@ from exif_tagger.ai_client import SecretRedactor, setup_secure_logging
 
 def test_secret_redactor_scrubs_headers():
     redactor = SecretRedactor()
-    record = logging.LogRecord("test", logging.ERROR, "", 0, "Authorization: Bearer sk-123456789012345678901234", (), None)
+    record = logging.LogRecord(
+        "test", logging.ERROR, "", 0, "Authorization: Bearer sk-123456789012345678901234", (), None
+    )
     redactor.filter(record)
     assert "sk-123456789012345678901234" not in record.getMessage()
     assert "[REDACTED]" in record.getMessage()

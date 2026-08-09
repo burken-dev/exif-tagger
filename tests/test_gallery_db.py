@@ -141,6 +141,7 @@ class TestGalleryDatabase:
 
     def test_update_image_in_db_from_file(self, test_db_path, tmp_path):
         from exif_tagger.db import update_image_in_db_from_file
+
         img_path = tmp_path / "single.jpg"
         img = PILImage.new("RGB", (100, 100), color="yellow")
         img.save(img_path)
@@ -156,15 +157,91 @@ class TestGalleryDatabase:
 
 def test_get_db_path_data_dir(monkeypatch, tmp_path):
     from exif_tagger.db import get_db_path
+
     monkeypatch.delenv("EXIFTAGGER_DB_FILE", raising=False)
     monkeypatch.setenv("EXIFTAGGER_DATA_DIR", str(tmp_path))
     assert get_db_path() == tmp_path / "gallery.db"
 
 
-
 def test_get_db_path_db_file_override(monkeypatch, tmp_path):
     from exif_tagger.db import get_db_path
+
     db_custom = tmp_path / "custom.db"
     monkeypatch.setenv("EXIFTAGGER_DB_FILE", str(db_custom))
     monkeypatch.setenv("EXIFTAGGER_DATA_DIR", str(tmp_path / "ignored"))
     assert get_db_path() == db_custom
+
+
+def test_get_gallery_images_filesystem_unindexed(tmp_path):
+    from exif_tagger.db import get_gallery_images, init_db, sync_single_image
+
+    db_path = tmp_path / "test.db"
+    init_db(db_path)
+
+    # Create dummy images on disk
+    img1 = tmp_path / "a.jpg"
+    img2 = tmp_path / "sub" / "b.png"
+    img2.parent.mkdir(parents=True, exist_ok=True)
+    img1.write_bytes(b"dummy")
+    img2.write_bytes(b"dummy")
+
+    # Call get_gallery_images without tags (should list both from disk even though DB is empty)
+    images, total = get_gallery_images(db_path=db_path, root_directory=tmp_path)
+    assert total == 2
+    assert images[0]["filename"] == "a.jpg"
+    assert images[0]["indexed"] is False
+    assert images[0]["id"] is None
+    assert images[1]["relative_path"] == "sub/b.png"
+
+    # Test sync_single_image
+    synced = sync_single_image("a.jpg", db_path=db_path, root_directory=tmp_path)
+    assert synced["indexed"] is True
+    assert synced["id"] is not None
+
+    # Query again: a.jpg should now be indexed, sub/b.png unindexed
+    images, total = get_gallery_images(db_path=db_path, root_directory=tmp_path)
+    assert images[0]["indexed"] is True
+    assert images[1]["indexed"] is False
+
+
+def test_get_gallery_images_untagged_folder_and_search(tmp_path):
+    from exif_tagger.db import get_gallery_images, init_db
+
+    db_path = tmp_path / "test.db"
+    init_db(db_path)
+
+    (tmp_path / "root.jpg").write_bytes(b"dummy")
+    sub1 = tmp_path / "folder1"
+    sub1.mkdir()
+    (sub1 / "img1.jpg").write_bytes(b"dummy")
+    (sub1 / "photo2.png").write_bytes(b"dummy")
+
+    sub2 = tmp_path / "folder2"
+    sub2.mkdir()
+    (sub2 / "other.jpg").write_bytes(b"dummy")
+
+    # Folder filter test
+    images, total = get_gallery_images(db_path=db_path, folder="folder1", root_directory=tmp_path)
+    assert total == 2
+    filenames = [img["filename"] for img in images]
+    assert filenames == ["img1.jpg", "photo2.png"]
+
+    # Search filter test (glob)
+    images_glob, total_glob = get_gallery_images(db_path=db_path, search="*.png", root_directory=tmp_path)
+    assert total_glob == 1
+    assert images_glob[0]["filename"] == "photo2.png"
+
+    # Search filter test (substring)
+    images_sub, total_sub = get_gallery_images(db_path=db_path, search="img1", root_directory=tmp_path)
+    assert total_sub == 1
+    assert images_sub[0]["filename"] == "img1.jpg"
+
+
+def test_sync_single_image_not_found(tmp_path):
+    from exif_tagger.db import init_db, sync_single_image
+
+    db_path = tmp_path / "test.db"
+    init_db(db_path)
+
+    with pytest.raises(FileNotFoundError):
+        sync_single_image("nonexistent.jpg", db_path=db_path, root_directory=tmp_path)

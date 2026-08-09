@@ -23,7 +23,7 @@ from pydantic import BaseModel
 from exif_tagger.ai_client import SecretRedactor, setup_secure_logging
 from exif_tagger.config import get_config_path, load_config
 from exif_tagger.main import PipelineEngine
-from exif_tagger.models.schema import ScheduleModel, TagDefinition
+from exif_tagger.models.schema import IMAGE_EXTENSIONS, ScheduleModel, TagDefinition
 
 logger = logging.getLogger(__name__)
 
@@ -56,10 +56,7 @@ SERVER_LOG_DIR = _config_dir / "server-log"
 SERVER_LOG_DIR.mkdir(parents=True, exist_ok=True)
 
 
-_log_formatter = logging.Formatter(
-    '%(asctime)s [%(levelname)s] %(name)s: %(message)s',
-    datefmt='%Y-%m-%d %H:%M:%S'
-)
+_log_formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
 
 _error_file_handler = logging.FileHandler(SERVER_LOG_DIR / "error.log")
 _error_file_handler.setLevel(logging.ERROR)
@@ -119,7 +116,6 @@ def _save_schedules() -> None:
         json.dump({sid: s.model_dump() for sid, s in _schedules.items()}, f, indent=2)
 
 
-
 def _compute_next_run(schedule: ScheduleModel) -> str | None:
     """Compute next run time based on schedule type."""
     now = datetime.now(UTC)
@@ -129,19 +125,18 @@ def _compute_next_run(schedule: ScheduleModel) -> str | None:
             minute, hour, dom, month, dow = parts
             try:
                 from apscheduler.triggers.cron import CronTrigger
-                trigger = CronTrigger(
-                    minute=minute, hour=hour, day=dom, month=month, day_of_week=dow, timezone=UTC
-                )
+
+                trigger = CronTrigger(minute=minute, hour=hour, day=dom, month=month, day_of_week=dow, timezone=UTC)
                 next_fire = trigger.get_next_fire_time(None, now)
                 return next_fire.isoformat() if next_fire else None
             except Exception:
                 return None
     elif schedule.interval_hours:
         from datetime import timedelta
+
         next_run = now.replace(microsecond=0) + timedelta(hours=schedule.interval_hours)
         return next_run.isoformat()
     return None
-
 
 
 def _run_schedule_job(schedule_id: str) -> None:
@@ -193,10 +188,7 @@ def _setup_scheduler() -> None:
             if len(parts) == 5:
                 minute, hour, dom, month, dow = parts
                 try:
-                    trigger = CronTrigger(
-                        minute=minute, hour=hour, day_of_week=dow,
-                        day=dom, month=month, timezone=UTC
-                    )
+                    trigger = CronTrigger(minute=minute, hour=hour, day_of_week=dow, day=dom, month=month, timezone=UTC)
                 except Exception as e:
                     logger.warning("Invalid cron expression for schedule '%s': %s", sid, e)
         elif schedule.interval_hours:
@@ -327,6 +319,7 @@ def api_update_config(updates: dict[str, Any]):
             current["exclude_patterns"] = patterns
 
         from exif_tagger.models.schema import Config as SchemaConfig
+
         validated = SchemaConfig(**current)
         validated.validate()
         validated.validate_exclude_patterns()
@@ -341,6 +334,7 @@ def api_update_config(updates: dict[str, Any]):
         error_detail = str(e)
         try:
             import re
+
             # Extract field: error pairs from Pydantic output
             matches = re.findall(r"(\w+):\s*(.+?)(?=,\s*\w+:|$)", error_detail)
             if matches:
@@ -353,6 +347,7 @@ def api_update_config(updates: dict[str, Any]):
 # ---------------------------------------------------------------------------
 # API Routes — Schedules
 # ---------------------------------------------------------------------------
+
 
 @app.get("/api/schedule")
 def api_list_schedules():
@@ -425,6 +420,7 @@ from exif_tagger.db import (
     get_image_by_id,
     remove_tag_globally,
     sync_gallery_index,
+    sync_single_image,
     update_image_tags_in_db_and_exif,
 )
 
@@ -443,6 +439,18 @@ class ImageTagsUpdateRequest(BaseModel):
     tags: list[str]
 
 
+class SingleImageSyncRequest(BaseModel):
+    relative_path: str | None = None
+    file_path: str | None = None
+
+
+class GallerySyncRequest(BaseModel):
+    mode: str = "all"
+    folder: str | None = None
+    search: str | None = None
+    tags: list[str] | str | None = None
+
+
 _sync_lock = threading.Lock()
 _sync_state: dict[str, Any] = {
     "status": "idle",
@@ -451,18 +459,46 @@ _sync_state: dict[str, Any] = {
 }
 
 
-def _run_gallery_sync() -> None:
+def _run_gallery_sync(req: GallerySyncRequest = GallerySyncRequest()) -> None:
     global _sync_state
     with _sync_lock:
         _sync_state["status"] = "running"
         _sync_state["error"] = None
     try:
         config = load_config(CONFIG_PATH)
-        stats = sync_gallery_index(
-            root_directory=config.root_directory,
-            exclude_patterns=config.exclude_patterns,
-        )
-        logger.info("Gallery index sync complete: %s", stats)
+        if req.mode == "filtered":
+            tag_list = None
+            if isinstance(req.tags, str):
+                tag_list = [t.strip() for t in req.tags.split(",") if t.strip()]
+            elif isinstance(req.tags, list):
+                tag_list = req.tags
+
+            images, total = get_gallery_images(
+                offset=0,
+                limit=100000,
+                tags=tag_list,
+                search=req.search,
+                folder=req.folder,
+                root_directory=config.root_directory,
+            )
+            synced_count = 0
+            for img in images:
+                path_to_sync = img.get("file_path") or img.get("relative_path")
+                if path_to_sync:
+                    sync_single_image(path_to_sync, root_directory=config.root_directory)
+                    synced_count += 1
+            stats = {
+                "total": total,
+                "indexed": synced_count,
+                "updated": synced_count,
+                "deleted": 0,
+            }
+        else:
+            stats = sync_gallery_index(
+                root_directory=config.root_directory,
+                exclude_patterns=config.exclude_patterns,
+            )
+        logger.info("Gallery index sync complete (%s): %s", req.mode, stats)
         with _sync_lock:
             _sync_state["status"] = "complete"
             _sync_state["stats"] = stats
@@ -478,7 +514,7 @@ def _sync_index_background() -> None:
 
 
 @app.post("/api/gallery/sync")
-def api_gallery_sync():
+def api_gallery_sync(req: GallerySyncRequest = GallerySyncRequest()):
     """Trigger manual re-sync of gallery database index in background."""
     with _sync_lock:
         if _sync_state["status"] == "running":
@@ -487,7 +523,7 @@ def api_gallery_sync():
         _sync_state["error"] = None
         _sync_state["stats"] = None
 
-    thread = threading.Thread(target=_run_gallery_sync, daemon=True)
+    thread = threading.Thread(target=_run_gallery_sync, args=(req,), daemon=True)
     thread.start()
     return {"status": "started", "message": "Gallery index sync started"}
 
@@ -531,12 +567,12 @@ def api_get_gallery_images(
 def api_get_gallery_folders(path: str = ""):
     """Get folder hierarchy and subfolder image counts for gallery folder navigation."""
     from exif_tagger.db import get_gallery_folders
+
     try:
         data = get_gallery_folders(relative_path=path)
         return data
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to query gallery folders: {e}")
-
 
 
 @app.get("/api/gallery/tags")
@@ -547,6 +583,52 @@ def api_get_gallery_tags():
         return {"tags": tag_names}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to fetch gallery tags: {e}")
+
+
+@app.get("/api/gallery/image/file")
+def api_get_gallery_image_file_by_path(path: str):
+    """Serve raw image file specified by query parameter `path` (relative or absolute)."""
+    try:
+        config = load_config(CONFIG_PATH)
+        root_dir = Path(config.root_directory).resolve()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to load config: {e}")
+
+    p = Path(path)
+    resolved_path = p.resolve() if p.is_absolute() else (root_dir / p).resolve()
+
+    try:
+        resolved_path.relative_to(root_dir)
+    except ValueError:
+        raise HTTPException(status_code=403, detail="Access denied: path is outside root directory")
+
+    if not resolved_path.exists() or not resolved_path.is_file():
+        raise HTTPException(status_code=404, detail="Image file does not exist on disk")
+
+    if resolved_path.suffix.lower() not in IMAGE_EXTENSIONS:
+        raise HTTPException(status_code=400, detail="Invalid image file extension")
+
+    return FileResponse(resolved_path)
+
+
+@app.post("/api/gallery/image/sync")
+def api_sync_single_image_endpoint(req: SingleImageSyncRequest):
+    """Sync a single image by relative or absolute path into the database index."""
+    target_path = req.relative_path or req.file_path
+    if not target_path:
+        raise HTTPException(status_code=400, detail="Path to image is required (relative_path or file_path)")
+
+    try:
+        config = load_config(CONFIG_PATH)
+        result = sync_single_image(
+            relative_or_abs_path=target_path,
+            root_directory=Path(config.root_directory),
+        )
+        return result
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to sync image: {e}")
 
 
 @app.get("/api/gallery/image/{image_id}")
@@ -625,6 +707,7 @@ def api_remove_tag_global(req: GlobalTagRemoveRequest):
 def api_get_gallery_image_suppressions(image_id: int):
     """Get list of user suppressions (blacklisted tags) for an image."""
     from exif_tagger.db import get_image_suppressions
+
     try:
         suppressions = get_image_suppressions(image_id)
         return {"suppressions": suppressions}
@@ -636,12 +719,12 @@ def api_get_gallery_image_suppressions(image_id: int):
 def api_delete_gallery_image_suppression(image_id: int, tag_name: str):
     """Remove a user suppression, unblacklisting the tag for future automated runs."""
     from exif_tagger.db import remove_user_suppression
+
     try:
         remove_user_suppression(image_id, tag_name)
         return {"status": "removed"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to remove suppression: {e}")
-
 
 
 from fastapi.staticfiles import StaticFiles
@@ -739,5 +822,5 @@ app.router.lifespan_context = lifespan
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8080)
 
+    uvicorn.run(app, host="0.0.0.0", port=8080)

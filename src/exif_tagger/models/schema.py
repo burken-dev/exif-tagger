@@ -12,9 +12,8 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 # ---------------------------------------------------------------------------
 # Image support – vilka filändelser vi accepterar
 # ---------------------------------------------------------------------------
-IMAGE_EXTENSIONS: frozenset[str] = frozenset(
-    {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".webp", ".heic", ".heif"}
-)
+IMAGE_EXTENSIONS: frozenset[str] = frozenset({".jpg", ".jpeg", ".png", ".tif", ".tiff", ".webp", ".heic", ".heif"})
+
 
 # ---------------------------------------------------------------------------
 # Model configuration (OpenAI-compatible endpoint)
@@ -22,13 +21,8 @@ IMAGE_EXTENSIONS: frozenset[str] = frozenset(
 class ModelConfig(BaseModel):
     """Konfiguration för vision-modellen som anropas via OpenAI-compatible API."""
 
-    base_url: str = Field(
-        description="Base URL to the OpenAI-compatible API endpoint "
-        "(e.g. https://api.openai.com/v1)"
-    )
-    model_name: str = Field(
-        description="Name of the vision model (e.g. gpt-4o, claude-3-opus via bridge)"
-    )
+    base_url: str = Field(description="Base URL to the OpenAI-compatible API endpoint (e.g. https://api.openai.com/v1)")
+    model_name: str = Field(description="Name of the vision model (e.g. gpt-4o, claude-3-opus via bridge)")
     api_key: str | None = Field(
         default=None,
         description="API key for authentication. Can be set via env var OPENAI_API_KEY.",
@@ -53,15 +47,15 @@ class ModelConfig(BaseModel):
             return None
         return value
 
-    model_config = ConfigDict(extra='allow')
+    model_config = ConfigDict(extra="allow")
+
+
 # Tag definition
 # ---------------------------------------------------------------------------
 class TagDefinition(BaseModel):
     """En enskild tagg med beskrivning och tröskelvärde för matchning."""
 
-    description: str = Field(
-        description="Beskrivning av vad en bild ska uppfylla för att matcha denna tagg"
-    )
+    description: str = Field(description="Beskrivning av vad en bild ska uppfylla för att matcha denna tagg")
     threshold: float = Field(
         default=0.7,
         ge=0.0,
@@ -109,9 +103,7 @@ class Config(BaseModel):
             upper_val = value.strip().upper()
             if upper_val in valid_levels:
                 return upper_val
-        raise ValueError(
-            f"Invalid log level '{value}'. Must be one of: {', '.join(sorted(valid_levels))}"
-        )
+        raise ValueError(f"Invalid log level '{value}'. Must be one of: {', '.join(sorted(valid_levels))}")
 
     # Validation & convenience methods
     def validate(self) -> None:
@@ -128,9 +120,7 @@ class Config(BaseModel):
             try:
                 re.compile(pattern)
             except re.error as exc:
-                raise ValueError(
-                    f"Invalid regex pattern '{pattern}': {exc}"
-                ) from exc
+                raise ValueError(f"Invalid regex pattern '{pattern}': {exc}") from exc
 
     @field_validator("tags", mode="before")
     @classmethod
@@ -146,12 +136,10 @@ class Config(BaseModel):
                     result[str(name)] = tag_def
             return result
         if isinstance(value, str):
-            raise ValueError(
-                "tags must be a dict of {tag_name: {description, threshold}} objects"
-            )
+            raise ValueError("tags must be a dict of {tag_name: {description, threshold}} objects")
         return value
 
-    model_config = ConfigDict(extra='allow')
+    model_config = ConfigDict(extra="allow")
 
 
 # ---------------------------------------------------------------------------
@@ -201,18 +189,12 @@ class CheckpointData(BaseModel):
 class ScheduleModel(BaseModel):
     """A single scheduled processing job."""
 
-    id: str = Field(
-        default_factory=lambda: f"schedule_{int(time.time())}_{hash(str(time.time())) % 10000}"
-    )
+    id: str = Field(default_factory=lambda: f"schedule_{int(time.time())}_{hash(str(time.time())) % 10000}")
     name: str = Field(description="Human-readable schedule name")
     folder: str = Field(description="Root directory to scan for images")
     max_images: int | None = Field(default=None, description="Max images per run (None = all)")
-    interval_hours: float | None = Field(
-        default=None, ge=0.1, description="Interval in hours (for simple intervals)"
-    )
-    cron_expression: str | None = Field(
-        default=None, description="Cron expression (e.g. '0 2 * * *')"
-    )
+    interval_hours: float | None = Field(default=None, ge=0.1, description="Interval in hours (for simple intervals)")
+    cron_expression: str | None = Field(default=None, description="Cron expression (e.g. '0 2 * * *')")
     enabled: bool = Field(default=True)
     last_run_at: str | None = Field(default=None, description="ISO timestamp of last run")
     last_status: str | None = Field(default=None, description="'success', 'failed', or None")
@@ -227,5 +209,4 @@ class ScheduleModel(BaseModel):
             raise ValueError("Cron expression must have exactly 5 fields (minute hour day month weekday)")
         return value
 
-    model_config = ConfigDict(extra='allow')
-
+    model_config = ConfigDict(extra="allow")

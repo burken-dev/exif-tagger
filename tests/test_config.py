@@ -199,9 +199,7 @@ class TestAtomicCheckpointSave:
 
         root = str(tmp_path)
         images: dict[str, ImageCheckpoint] = {
-            "photo.jpg": ImageCheckpoint(
-                path="photo.jpg", status="done", matched_tags=["landscape"]
-            ),
+            "photo.jpg": ImageCheckpoint(path="photo.jpg", status="done", matched_tags=["landscape"]),
         }
 
         save_checkpoint(root, total_images=2, images=images)
@@ -263,4 +261,3 @@ class TestGetConfigPath:
         config_file = data_dir / "config.yaml"
         assert config_file.exists()
         assert config.root_directory == str(tmp_path)
-

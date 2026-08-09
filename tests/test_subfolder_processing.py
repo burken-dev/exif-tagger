@@ -3,10 +3,9 @@
 from pathlib import Path
 from unittest.mock import patch
 
-from PIL import Image
-
 import pytest
 from fastapi.testclient import TestClient
+from PIL import Image
 
 from exif_tagger.db import get_connection, get_gallery_folders, sync_gallery_index
 from exif_tagger.main import PipelineEngine
@@ -204,21 +203,18 @@ def test_pipeline_engine_start_session_scoping(tmp_path: Path, monkeypatch):
 
     # Engine start_session with path traversal should fail validation
     engine = PipelineEngine(config_path="config.yaml")
-    monkeypatch.setattr(
-        engine,
-        "_load_config",
-        lambda: type(
-            "Config",
-            (),
-            {
-                "root_directory": str(root),
-                "validate": lambda self: None,
-                "validate_exclude_patterns": lambda self: None,
-                "log_level": "INFO",
-                "log_dir": str(tmp_path / "logs"),
-            },
-        )(),
-    )
+    mock_config = type(
+        "Config",
+        (),
+        {
+            "root_directory": str(root),
+            "validate": lambda self: None,
+            "validate_exclude_patterns": lambda self: None,
+            "log_level": "INFO",
+            "log_dir": str(tmp_path / "logs"),
+        },
+    )()
+    monkeypatch.setattr(engine, "_load_config", lambda: mock_config)
 
     with pytest.raises(ValueError) as exc_info:
         engine.start_session(root_directory="../../etc/passwd")

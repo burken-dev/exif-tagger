@@ -568,6 +568,7 @@ export const ConfigTab: React.FC = () => {
           <AdvancedApiParams
             params={advancedParams}
             enabledKeys={advancedEnabled}
+            useStructuredOutputs={formData.model?.use_structured_outputs ?? true}
             onChange={(params, enabled) => {
               setAdvancedParams(params);
               setAdvancedEnabled(enabled);

@@ -60,7 +60,11 @@ export const ImageCard: React.FC<ImageCardProps> = ({
         className="aspect-square relative w-full overflow-hidden bg-muted cursor-pointer"
       >
         <img
-          src={`/api/gallery/image/file?path=${encodeURIComponent(image.relative_path)}`}
+          src={
+            image.id !== null
+              ? `/api/gallery/image/${image.id}/file`
+              : `/api/gallery/image/file?path=${encodeURIComponent(image.relative_path)}`
+          }
           alt={image.filename}
           loading="lazy"
           className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"

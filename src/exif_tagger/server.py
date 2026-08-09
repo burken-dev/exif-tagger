@@ -545,6 +545,7 @@ def api_get_gallery_images(
 ):
     """List images with pagination and optional tag/search/folder filtering."""
     try:
+        config = load_config(CONFIG_PATH)
         tag_list = [t.strip() for t in tags.split(",") if t.strip()] if tags else None
         images, total = get_gallery_images(
             offset=offset,
@@ -552,6 +553,7 @@ def api_get_gallery_images(
             tags=tag_list,
             search=search,
             folder=folder,
+            root_directory=config.root_directory,
         )
         return {
             "images": images,

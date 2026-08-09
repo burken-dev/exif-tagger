@@ -60,6 +60,9 @@ export interface ModelConfig {
   api_key?: string;
   use_structured_outputs?: boolean;
   max_image_dimension?: number;
+  image_format?: 'webp' | 'jpeg';
+  image_quality?: number;
+  concurrency?: number;
   params?: Record<string, any>;
 }
 

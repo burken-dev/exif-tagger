@@ -80,6 +80,18 @@ class TestParseResponse:
         assert len(result.results) == 1
         assert result.results[0].tag_name == "x"
 
+    def test_json_in_markdown_uppercase_and_plain_fences(self):
+        """Model may wrap JSON in ```JSON ... ``` or plain ``` ... ``` blocks."""
+        response_str_upper = '```JSON\n{"results": [{"tag_name": "y", "score": 0.9}]}\n```'
+        result_upper = _parse_response(response_str_upper)
+        assert len(result_upper.results) == 1
+        assert result_upper.results[0].tag_name == "y"
+
+        response_str_plain = '```\n{"results": [{"tag_name": "z", "score": 0.7}]}\n```'
+        result_plain = _parse_response(response_str_plain)
+        assert len(result_plain.results) == 1
+        assert result_plain.results[0].tag_name == "z"
+
     def test_preamble_text_before_markdown_code_block(self):
         """Model may add conversational text before markdown-wrapped JSON."""
         response_str = 'Here is the analysis:\n\n```json\n{"results": [{"tag_name": "x", "score": 0.8}]}\n```\n'

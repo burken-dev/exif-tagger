@@ -255,7 +255,10 @@ class PipelineEngine:
             if root_directory:
                 override_str = str(root_directory).strip()
                 if override_str and override_str != ".":
+                    clean_sub_str = override_str.replace("\\", "/").strip("/")
                     override_path = Path(override_str)
+
+                    # 1. If override_path is an absolute path that is inside base_gallery_root
                     if override_path.is_absolute():
                         resolved_override = override_path.resolve()
                         try:
@@ -263,9 +266,28 @@ class PipelineEngine:
                             if rel.as_posix() != ".":
                                 target_subfolder = rel.as_posix()
                         except ValueError:
-                            effective_gallery_root = resolved_override
+                            # If not under base_gallery_root, check if clean_sub_str exists under base_gallery_root
+                            candidate = (base_gallery_root / clean_sub_str).resolve()
+                            if candidate.exists():
+                                try:
+                                    rel = candidate.relative_to(base_gallery_root)
+                                    if rel.as_posix() != ".":
+                                        target_subfolder = rel.as_posix()
+                                except ValueError:
+                                    effective_gallery_root = resolved_override
+                            elif resolved_override.exists():
+                                effective_gallery_root = resolved_override
                     else:
-                        target_subfolder = override_str.strip("/")
+                        candidate = (base_gallery_root / clean_sub_str).resolve()
+                        if candidate.exists():
+                            try:
+                                rel = candidate.relative_to(base_gallery_root)
+                                if rel.as_posix() != ".":
+                                    target_subfolder = rel.as_posix()
+                            except ValueError:
+                                target_subfolder = clean_sub_str
+                        else:
+                            target_subfolder = clean_sub_str
 
             config.root_directory = str(effective_gallery_root)
 
@@ -311,9 +333,9 @@ class PipelineEngine:
             if target_subfolder:
                 conn = get_connection()
                 try:
-                    clean_sub = target_subfolder.lower()
+                    clean_sub = target_subfolder.replace("\\", "/").strip("/").lower()
                     row = conn.execute(
-                        "SELECT COUNT(*) FROM images WHERE LOWER(relative_path) LIKE ? OR LOWER(relative_path) = ?",
+                        "SELECT COUNT(*) FROM images WHERE LOWER(REPLACE(relative_path, '\\', '/')) LIKE ? OR LOWER(REPLACE(relative_path, '\\', '/')) = ?",
                         (f"{clean_sub}/%", clean_sub),
                     ).fetchone()
                     total_found = row[0] if row else 0

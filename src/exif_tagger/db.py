@@ -969,9 +969,9 @@ def get_unevaluated_candidates(
         params: list[Any] = []
 
         if subfolder:
-            clean_sub = subfolder.strip().strip("/").lower()
+            clean_sub = subfolder.replace("\\", "/").strip("/").lower()
             if clean_sub and clean_sub != ".":
-                query_sql += " WHERE (LOWER(relative_path) LIKE ? OR LOWER(relative_path) = ?)"
+                query_sql += " WHERE (LOWER(REPLACE(relative_path, '\\', '/')) LIKE ? OR LOWER(REPLACE(relative_path, '\\', '/')) = ?)"
                 params.extend([f"{clean_sub}/%", clean_sub])
 
         query_sql += " ORDER BY id ASC"

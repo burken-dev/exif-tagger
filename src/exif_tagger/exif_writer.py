@@ -155,7 +155,8 @@ def write_xptags(
             exif_data[40094] = utf16le_value
 
             # Write EXIF bytes back to the same file
-            img.save(str(validated_path), exif=exif_data.tobytes())
+            save_fmt = img.format or ("HEIF" if validated_path.suffix.lower() in (".heic", ".heif") else None)
+            img.save(str(validated_path), format=save_fmt, exif=exif_data.tobytes())
 
         # Verify integrity after write
         _verify_image_integrity(validated_path)
@@ -211,7 +212,8 @@ def set_xptags(
                 if 40094 in exif_data:
                     del exif_data[40094]
 
-            img.save(str(validated_path), exif=exif_data.tobytes())
+            save_fmt = img.format or ("HEIF" if validated_path.suffix.lower() in (".heic", ".heif") else None)
+            img.save(str(validated_path), format=save_fmt, exif=exif_data.tobytes())
 
         _verify_image_integrity(validated_path)
         return True

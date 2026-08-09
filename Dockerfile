@@ -21,8 +21,8 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
 
 
-# Final image – minimal Alpine with exiftool for XPTags support
-FROM python:3.12-alpine
+# Stage 3: Minimal production runtime image (default)
+FROM python:3.12-alpine AS runtime
 
 WORKDIR /app
 
@@ -49,3 +49,17 @@ EXPOSE 8080
 
 # Run FastAPI server via uvicorn
 ENTRYPOINT ["uvicorn", "src.exif_tagger.server:app", "--host", "0.0.0.0", "--port", "8080"]
+
+# Stage 4: Self-contained dev & testing target
+FROM runtime AS dev
+
+WORKDIR /app
+
+RUN pip install --no-cache-dir pytest pytest-cov requests
+
+COPY config.dev.yaml ./config.dev.yaml
+COPY testimages/ ./testimages/
+COPY tests/ ./tests/
+
+ENV EXIFTAGGER_CONFIG_FILE=/app/config.dev.yaml
+ENV EXIFTAGGER_ROOT_DIRECTORY=/app/testimages

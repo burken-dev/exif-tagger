@@ -298,6 +298,7 @@ def reconcile_gallery_index(
     compilers = build_exclude_compilers(exclude_patterns or [])
     stats = {"total": 0, "added": 0, "removed": 0, "updated": 0}
     now_iso = datetime.now(UTC).isoformat()
+    seen_real: set[str] = {os.path.realpath(str(root))}
 
     def is_excluded(rel: str) -> bool:
         return any(c.search(rel) for c in compilers)
@@ -340,6 +341,10 @@ def reconcile_gallery_index(
             for e in entries:
                 try:
                     if e.is_dir():
+                        real = os.path.realpath(e.path)
+                        if real in seen_real:
+                            continue
+                        seen_real.add(real)
                         stack.append(e.path)
                 except OSError:
                     continue

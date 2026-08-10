@@ -157,3 +157,25 @@ def test_reconcile_full_rebuild_matches_incremental(tmp_path):
     assert stats_full["total"] == 2
     assert stats_full["added"] == 0 and stats_full["removed"] == 0
     assert set(db_rows(db)) == {"a.jpg", "sub/b.png"}
+
+
+def test_reconcile_symlink_dir_alias_no_duplicate(tmp_path):
+    import os
+
+    from exif_tagger.db import get_connection, reconcile_gallery_index
+
+    db = tmp_path / "g.db"
+    root = tmp_path / "gallery"
+    real = root / "real"
+    real.mkdir(parents=True)
+    make_img(real / "a.jpg")
+    os.symlink(real, root / "alias", target_is_directory=True)
+
+    for _ in range(2):
+        stats = reconcile_gallery_index(root, db_path=db)
+        assert stats["total"] == 1
+
+    conn = get_connection(db)
+    rows = conn.execute("SELECT file_path FROM images").fetchall()
+    conn.close()
+    assert len({r["file_path"] for r in rows}) == 1  # alias and real do not double-index

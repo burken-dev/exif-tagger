@@ -44,7 +44,7 @@ def test_get_gallery_folders(tmp_path: Path):
     sync_gallery_index(root_directory=root, db_path=db_file)
 
     # 1. Test root folder listing
-    res_root = get_gallery_folders(relative_path="", db_path=db_file)
+    res_root = get_gallery_folders(relative_path="", db_path=db_file, root_directory=root)
     assert res_root["current_path"] == ""
     folder_names = [f["name"] for f in res_root["folders"]]
     assert "vacation" in folder_names
@@ -55,7 +55,7 @@ def test_get_gallery_folders(tmp_path: Path):
     assert vac_folder["image_count"] == 2
 
     # 2. Test subfolder listing under "vacation"
-    res_vac = get_gallery_folders(relative_path="vacation", db_path=db_file)
+    res_vac = get_gallery_folders(relative_path="vacation", db_path=db_file, root_directory=root)
     assert res_vac["current_path"] == "vacation"
     assert len(res_vac["folders"]) == 1
     assert res_vac["folders"][0]["name"] == "2024"

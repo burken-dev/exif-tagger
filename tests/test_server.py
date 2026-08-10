@@ -467,3 +467,28 @@ class TestGalleryTask2Endpoints:
             assert sdata["status"] == "complete"
             assert sdata["stats"]["total"] == 1
             assert sdata["stats"]["indexed"] == 1
+
+
+def test_gallery_index_poller_registered(monkeypatch, tmp_path):
+    """With the default config, the poller job is registered on startup."""
+    import exif_tagger.server as server_module
+    from exif_tagger.server import _setup_scheduler
+
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text(
+        f"root_directory: {tmp_path}\n"
+        "model:\n"
+        "  base_url: http://test/v1\n"
+        "  model_name: test\n"
+        "gallery_index:\n"
+        "  enabled: true\n"
+        "  poll_interval_seconds: 10\n"
+    )
+
+    monkeypatch.setattr("exif_tagger.server.CONFIG_PATH", str(cfg))
+    _setup_scheduler()
+    try:
+        job = server_module._scheduler.get_job("gallery_index_poll")
+        assert job is not None
+    finally:
+        server_module._scheduler.shutdown(wait=False)

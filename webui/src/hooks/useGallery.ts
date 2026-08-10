@@ -31,6 +31,7 @@ export function useGallery() {
   const pageSizeRef = useRef<number>(pageSize);
   const isPollingRef = useRef<boolean>(false);
   const isSyncingHashRef = useRef<boolean>(false);
+  const galleryAbortController = useRef<AbortController | null>(null);
 
   useEffect(() => {
     currentFolderRef.current = currentFolder;
@@ -71,14 +72,16 @@ export function useGallery() {
       const parsedPage = parseInt(params.get('page') || '1', 10);
       setCurrentPage(isNaN(parsedPage) || parsedPage < 1 ? 1 : parsedPage);
 
-      const parsedLimit = parseInt(params.get('limit') || '48', 10);
+      const storedPageSize = parseInt(localStorage.getItem('gallery.pageSize') || '48', 10);
+      const parsedLimit = parseInt(params.get('limit') || String(storedPageSize), 10);
       setPageSize(isNaN(parsedLimit) || parsedLimit < 1 ? 48 : parsedLimit);
     } else {
       setCurrentFolder('');
       setSearchQuery('');
       setSelectedTags(new Set());
       setCurrentPage(1);
-      setPageSize(48);
+      const storedPageSizeFallback = parseInt(localStorage.getItem('gallery.pageSize') || '48', 10);
+      setPageSize(isNaN(storedPageSizeFallback) || storedPageSizeFallback < 1 ? 48 : storedPageSizeFallback);
     }
 
     setTimeout(() => {
@@ -118,6 +121,13 @@ export function useGallery() {
     };
   }, [parseUrlHash]);
 
+  // Cleanup abort controller on unmount
+  useEffect(() => {
+    return () => {
+      galleryAbortController.current?.abort();
+    };
+  }, []);
+
   // Update URL Hash whenever relevant state changes
   useEffect(() => {
     updateUrlHash();
@@ -137,6 +147,10 @@ export function useGallery() {
 
   // Fetch Images
   const fetchGalleryImages = useCallback(async () => {
+    galleryAbortController.current?.abort();
+    const controller = new AbortController();
+    galleryAbortController.current = controller;
+
     setLoading(true);
     setError(null);
     try {
@@ -155,13 +169,14 @@ export function useGallery() {
       if (trimmedSearch) url += `&search=${encodeURIComponent(trimmedSearch)}`;
       if (folder) url += `&folder=${encodeURIComponent(folder)}`;
 
-      const resp = await fetch(url);
+      const resp = await fetch(url, { signal: controller.signal });
       if (!resp.ok) throw new Error('Failed to fetch gallery images');
       const data = await resp.json();
 
       setImages(data.images || []);
       setTotalImages(data.total || 0);
     } catch (err: any) {
+      if (err.name === 'AbortError') return;
       setError(err.message || 'Error loading images');
       setImages([]);
       setTotalImages(0);
@@ -509,6 +524,11 @@ export function useGallery() {
     setCurrentPage(1);
   }, []);
 
+  const handleSetPageSize = useCallback((size: number) => {
+    try { localStorage.setItem('gallery.pageSize', String(size)); } catch {}
+    setPageSize(size);
+  }, []);
+
   return {
     images,
     allTags,
@@ -546,6 +566,6 @@ export function useGallery() {
     setModalFolder,
     setSearchQuery: handleSetSearchQuery,
     setCurrentPage,
-    setPageSize,
+    setPageSize: handleSetPageSize,
   };
 }

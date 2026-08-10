@@ -17,8 +17,8 @@ from pathlib import Path
 from typing import Any
 
 from apscheduler.schedulers.background import BackgroundScheduler
-from fastapi import FastAPI, HTTPException, Response
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi.responses import FileResponse, JSONResponse
 from PIL import Image
 from pydantic import BaseModel
 
@@ -208,9 +208,12 @@ def _setup_scheduler() -> None:
             except Exception as e:
                 logger.warning("Failed to add job for schedule '%s': %s", sid, e)
 
-
-from fastapi import Request
-from fastapi.responses import JSONResponse
+# ---------------------------------------------------------------------------
+# Per-request cancellation state for gallery image queries
+# ---------------------------------------------------------------------------
+_gallery_cancel_callbacks: dict[str, callable] = {}
+_gallery_cancel_events: dict[str, threading.Event] = {}
+_cancel_event_lock = threading.Lock()
 
 
 @app.exception_handler(Exception)
@@ -558,7 +561,8 @@ def api_gallery_sync_status():
 
 
 @app.get("/api/gallery/images")
-def api_get_gallery_images(
+async def api_get_gallery_images(
+    request: Request,
     offset: int = 0,
     limit: int = 50,
     tags: str | None = None,
@@ -566,6 +570,26 @@ def api_get_gallery_images(
     folder: str | None = None,
 ):
     """List images with pagination and optional tag/search/folder filtering."""
+    import asyncio
+
+    cancelled_event = threading.Event()
+
+    async def _monitor():
+        while not cancelled_event.is_set():
+            try:
+                if await request.is_disconnected():
+                    cancelled_event.set()
+                    return
+            except Exception:
+                pass
+            await asyncio.sleep(0.1)
+
+    # Start disconnect monitor in background
+    monitor_task = asyncio.create_task(_monitor())
+
+    def is_cancelled():
+        return cancelled_event.is_set()
+
     try:
         config = load_config(CONFIG_PATH)
         tag_list = [t.strip() for t in tags.split(",") if t.strip()] if tags else None
@@ -576,6 +600,7 @@ def api_get_gallery_images(
             search=search,
             folder=folder,
             root_directory=config.root_directory,
+            is_cancelled=is_cancelled,
         )
         return {
             "images": images,
@@ -585,6 +610,10 @@ def api_get_gallery_images(
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to query gallery images: {e}")
+    finally:
+        cancelled_event.set()
+        if not monitor_task.done():
+            monitor_task.cancel()
 
 
 @app.get("/api/gallery/folders")

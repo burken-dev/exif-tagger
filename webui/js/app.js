@@ -68,6 +68,7 @@ let galleryState = {
     currentModalImageId: null,
 };
 
+let galleryAbortController = null;
 let isSyncingHash = false;
 
 function updateUrlHash() {
@@ -288,6 +289,10 @@ document.getElementById('btn-select-current-folder')?.addEventListener('click', 
 });
 
 async function fetchGalleryImages() {
+    galleryAbortController?.abort();
+    const controller = new AbortController();
+    galleryAbortController = controller;
+
     const grid = document.getElementById('gallery-grid');
     if (!grid) return;
 
@@ -303,7 +308,7 @@ async function fetchGalleryImages() {
     if (galleryState.currentFolder) url += `&folder=${encodeURIComponent(galleryState.currentFolder)}`;
 
     try {
-        const resp = await fetch(url);
+        const resp = await fetch(url, { signal: controller.signal });
         if (!resp.ok) throw new Error('Failed to fetch gallery images');
         const data = await resp.json();
 
@@ -314,6 +319,7 @@ async function fetchGalleryImages() {
         renderPagination();
         updateSelectedCountUI();
     } catch (e) {
+        if (e.name === 'AbortError') return;
         grid.innerHTML = `<div class="empty-gallery-msg" style="color:#f87171;">Error loading images: ${e.message}</div>`;
     }
 }

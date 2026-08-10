@@ -492,3 +492,32 @@ def test_gallery_index_poller_registered(monkeypatch, tmp_path):
         assert job is not None
     finally:
         server_module._scheduler.shutdown(wait=False)
+
+
+def test_poll_refreshes_index_and_reads(tmp_path):
+    """A reconcile round makes a newly added file visible to the gallery API."""
+    from exif_tagger.db import reconcile_gallery_index
+    from exif_tagger.models.schema import Config as SchemaConfig
+    from exif_tagger.models.schema import ModelConfig
+
+    gallery = tmp_path / "gallery"
+    gallery.mkdir()
+    (gallery / "a.jpg").write_bytes(b"\xff\xd8\xff\xe0\x00\x10JFIF\x00")
+
+    dummy_config = SchemaConfig(
+        root_directory=str(gallery),
+        model=ModelConfig(base_url="http://t/v1", model_name="t"),
+    )
+
+    with (
+        patch("exif_tagger.server.load_config", return_value=dummy_config),
+        patch("exif_tagger.server.CONFIG_PATH", str(tmp_path / "config.yaml")),
+        TestClient(server_module.app) as client,
+    ):
+        # Startup reconcile seeded the index.
+        assert client.get("/api/gallery/images").json()["total"] == 1
+
+        # A file added on disk after startup shows up after one reconcile round.
+        (gallery / "b.jpg").write_bytes(b"\xff\xd8\xff\xe0\x00\x10JFIF\x00")
+        reconcile_gallery_index(gallery, db_path=None)
+        assert client.get("/api/gallery/images").json()["total"] == 2

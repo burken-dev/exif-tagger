@@ -40,11 +40,6 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Enable verbose per-image logging during processing.",
     )
     parser.add_argument(
-        "--force",
-        action="store_true",
-        help="Ignore existing checkpoint and start processing from the beginning.",
-    )
-    parser.add_argument(
         "--list-tags",
         action="store_true",
         help="List all configured tags with descriptions and thresholds, then exit.",
@@ -216,11 +211,6 @@ class ProcessingState:
         with self._lock:
             return list(self._log_entries)
 
-    @property
-    def log_lines(self) -> list[str]:
-        with self._lock:
-            return [e["text"] for e in self._log_entries[-200:]]
-
     def start(self, total_images: int) -> None:
         with self._lock:
             self._running = True
@@ -276,10 +266,9 @@ class PipelineEngine:
         self,
         root_directory: str | None = None,
         max_images: int | None = None,
-        force_resume: bool = False,
     ) -> dict:
         from exif_tagger.ai_client import tag_image_with_ai
-        from exif_tagger.exif_writer import tag_image_exif
+        from exif_tagger.exif_writer import set_xptags
 
         state_handler = None
         logger = logging.getLogger("exif_tagger")
@@ -475,7 +464,7 @@ class PipelineEngine:
 
                     if newly_matched:
                         sorted_tags = sorted(current_exif_tags)
-                        modified, n_new = tag_image_exif(img_path, sorted_tags)
+                        modified = set_xptags(img_path, sorted_tags)
 
                         from datetime import UTC, datetime
 
@@ -583,19 +572,14 @@ class PipelineEngine:
             "logs": s.get_logs(),
         }
 
-    def get_summary(self) -> dict | None:
-        """Get the summary from the last completed run."""
-        return self.state.summary
-
 
 def run(
     config_path: str,
     verbose: bool = False,
-    force_resume: bool = False,
 ) -> int:
     """Execute the full tagging pipeline via CLI. Returns exit code (0=success, 1=error)."""
     engine = PipelineEngine(config_path=config_path, verbose=verbose)
-    summary = engine.start_session(force_resume=force_resume)
+    summary = engine.start_session()
     return summary.get("exit_code", 0 if not summary.get("errors") else 1)
 
 
@@ -614,7 +598,6 @@ def main() -> None:
     exit_code = run(
         config_path=args.config,
         verbose=args.verbose,
-        force_resume=args.force,
     )
     sys.exit(exit_code)
 

@@ -32,6 +32,8 @@ export const GalleryTab: React.FC = () => {
     isSyncing,
     loading,
     error,
+    foldersLoading,
+    imageDetailLoading,
     fetchFolders,
     toggleTagFilter,
     clearTagFilters,
@@ -187,9 +189,6 @@ export const GalleryTab: React.FC = () => {
           <GalleryToolbar
             searchQuery={searchQuery}
             onSearchChange={setSearchQuery}
-            onSync={handleSyncIndex}
-            isSyncing={isSyncing}
-            hasActiveFilters={hasActiveFilters}
           />
 
           {/* Active Tag Filter Badges */}
@@ -263,6 +262,7 @@ export const GalleryTab: React.FC = () => {
         breadcrumbs={folderBreadcrumbs}
         onNavigate={(path) => fetchFolders(path)}
         onSelectFolder={setCurrentFolder}
+        isFoldersLoading={foldersLoading}
       />
 
       {/* Single Image Detail Modal */}
@@ -273,6 +273,7 @@ export const GalleryTab: React.FC = () => {
         onUpdateTags={updateSingleImageTags}
         onSyncSingleImage={syncSingleImage}
         allTags={allTags}
+        isImageDetailLoading={imageDetailLoading}
       />
     </div>
   );

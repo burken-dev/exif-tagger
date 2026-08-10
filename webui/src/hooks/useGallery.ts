@@ -23,6 +23,8 @@ export function useGallery() {
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
+  const [foldersLoading, setFoldersLoading] = useState<boolean>(false);
+  const [imageDetailLoading, setImageDetailLoading] = useState<boolean>(false);
 
   const currentFolderRef = useRef<string>(currentFolder);
   const searchQueryRef = useRef<string>(searchQuery);
@@ -188,6 +190,7 @@ export function useGallery() {
   // Fetch Folders for modal / breadcrumbs navigation
   const fetchFolders = useCallback(async (path = '') => {
     setModalFolder(path);
+    setFoldersLoading(true);
     try {
       const resp = await fetch(`/api/gallery/folders?path=${encodeURIComponent(path)}`);
       if (!resp.ok) throw new Error('Failed to fetch folders');
@@ -198,6 +201,8 @@ export function useGallery() {
       console.error('Failed to load modal folders:', err);
       setFolders([]);
       setFolderBreadcrumbs([]);
+    } finally {
+      setFoldersLoading(false);
     }
   }, []);
 
@@ -377,12 +382,15 @@ export function useGallery() {
   const fetchImageDetail = useCallback(async (imageOrId: number | GalleryImage | null) => {
     if (imageOrId === null) {
       setSelectedImageDetail(null);
+      setImageDetailLoading(false);
       return;
     }
     if (typeof imageOrId === 'object') {
       setSelectedImageDetail(imageOrId);
+      setImageDetailLoading(false);
       return;
     }
+    setImageDetailLoading(true);
     try {
       const resp = await fetch(`/api/gallery/image/${imageOrId}`);
       if (!resp.ok) throw new Error('Image not found');
@@ -391,6 +399,8 @@ export function useGallery() {
     } catch (err: any) {
       console.error('Failed to fetch image detail:', err);
       setSelectedImageDetail(null);
+    } finally {
+      setImageDetailLoading(false);
     }
   }, []);
 
@@ -546,6 +556,8 @@ export function useGallery() {
     isSyncing,
     loading,
     error,
+    foldersLoading,
+    imageDetailLoading,
     fetchGalleryTags,
     fetchGalleryImages,
     fetchFolders,

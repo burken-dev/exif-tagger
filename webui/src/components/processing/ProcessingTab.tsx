@@ -22,6 +22,7 @@ export const ProcessingTab: React.FC = () => {
     folders,
     modalFolder,
     folderBreadcrumbs,
+    foldersLoading,
     startProcessing,
     stopProcessing,
     clearLogs,
@@ -105,6 +106,7 @@ export const ProcessingTab: React.FC = () => {
         breadcrumbs={folderBreadcrumbs}
         onNavigate={(path) => fetchFolders(path)}
         onSelectFolder={handleSelectFolder}
+        isFoldersLoading={foldersLoading}
         title="Select Processing Directory"
         description="Navigate and select the directory containing images to process."
       />

@@ -366,7 +366,6 @@ class PipelineEngine:
                 active_tags=config.tags,
                 tag_hashes=tag_hashes,
                 subfolder=target_subfolder,
-                limit=max_images,
             )
 
             # Group candidates by image
@@ -376,13 +375,17 @@ class PipelineEngine:
 
             images_to_process = [Path(p) for p in images_candidates_map.keys()]
 
+            # Cap images to process at max_images (don't cap DB query — let loop handle it)
+            if max_images and max_images > 0 and len(images_to_process) > max_images:
+                images_to_process = images_to_process[:max_images]
+
             logger.info(
                 "%d total images in folder, %d require vision model evaluation.",
                 total_found,
                 len(images_to_process),
             )
 
-            session_total = min(total_found, max_images) if (max_images and max_images > 0) else total_found
+            session_total = total_found
 
             if not images_to_process:
                 summary = {

@@ -473,3 +473,30 @@ def test_update_image_in_db_from_file_gates_on_exif_mtime(tmp_path):
         "SELECT tag_name FROM image_tags WHERE image_id = ?", (img_id,))}
     conn.close()
     assert tags == {"tag1", "useronly"}
+
+
+def test_update_image_tags_sets_exif_mtime(tmp_path):
+    import os
+
+    from exif_tagger.db import get_connection, init_db, sync_gallery_index, update_image_tags_in_db_and_exif
+
+    db_path = tmp_path / "test.db"
+    init_db(db_path)
+    gallery_dir = tmp_path / "gallery"
+    gallery_dir.mkdir()
+    img = gallery_dir / "photo.jpg"
+    PILImage.new("RGB", (50, 50), color="blue").save(img)
+    set_xptags(img, [])
+
+    sync_gallery_index(gallery_dir, db_path=db_path)
+    conn = get_connection(db_path)
+    img_id = conn.execute("SELECT id FROM images").fetchone()["id"]
+    conn.close()
+
+    assert update_image_tags_in_db_and_exif(img_id, ["edited"], db_path=db_path) is True
+
+    conn = get_connection(db_path)
+    row = conn.execute("SELECT last_modified, exif_mtime FROM images WHERE id = ?", (img_id,)).fetchone()
+    conn.close()
+    assert abs(row["exif_mtime"] - row["last_modified"]) < 0.001
+    assert abs(row["last_modified"] - os.stat(img).st_mtime) < 0.001

@@ -925,7 +925,7 @@ def update_image_tags_in_db_and_exif(
         now_iso = datetime.now(UTC).isoformat()
 
         with conn:
-            conn.execute("UPDATE images SET last_modified = ? WHERE id = ?", (mtime, image_id))
+            conn.execute("UPDATE images SET last_modified = ?, exif_mtime = ? WHERE id = ?", (mtime, mtime, image_id))
             conn.execute("DELETE FROM image_tags WHERE image_id = ?", (image_id,))
             for t in clean_tags:
                 source = "manual_ui" if t in added_tags else "model"
@@ -997,7 +997,7 @@ def batch_update_tags(
                 mtime = img_path.stat().st_mtime if img_path.exists() else 0.0
 
                 with conn:
-                    conn.execute("UPDATE images SET last_modified = ? WHERE id = ?", (mtime, img_id))
+                    conn.execute("UPDATE images SET last_modified = ?, exif_mtime = ? WHERE id = ?", (mtime, mtime, img_id))
                     conn.execute("DELETE FROM image_tags WHERE image_id = ?", (img_id,))
                     for t in sorted_tags:
                         source = "manual_ui" if t in to_add else "model"
@@ -1391,7 +1391,7 @@ def evaluate_thresholds_locally(
                 now_iso = datetime.now(UTC).isoformat()
 
                 with conn:
-                    conn.execute("UPDATE images SET last_modified = ? WHERE id = ?", (mtime, img_id))
+                    conn.execute("UPDATE images SET last_modified = ?, exif_mtime = ? WHERE id = ?", (mtime, mtime, img_id))
                     conn.execute("DELETE FROM image_tags WHERE image_id = ?", (img_id,))
                     for t in sorted_tags:
                         conn.execute(

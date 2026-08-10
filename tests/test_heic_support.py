@@ -5,7 +5,7 @@ from PIL import Image
 
 import exif_tagger  # noqa: F401
 from exif_tagger.ai_client import _image_to_base64
-from exif_tagger.exif_writer import get_existing_xptags, write_xptags
+from exif_tagger.exif_writer import get_existing_xptags, set_xptags
 
 
 def test_heic_opener_is_registered():
@@ -33,9 +33,8 @@ def test_heic_exif_write_and_read():
 
     img.save(heic_path, format="HEIF")
 
-    modified, count = write_xptags(heic_path, ["nature", "outdoor"])
+    modified = set_xptags(heic_path, ["nature", "outdoor"])
     assert modified is True
-    assert count == 2
 
     tags = get_existing_xptags(heic_path)
     assert tags == {"nature", "outdoor"}

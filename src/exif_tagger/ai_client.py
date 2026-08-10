@@ -29,7 +29,6 @@ class SecretRedactor(logging.Filter):
         r"sk-[a-zA-Z0-9]{20,}",
         r'api_key[=:]\s*["\']?[^\s"\']+["\']?',
         r"Bearer\s+[a-zA-Z0-9\-_]+",
-        r"sk-[a-fA-F0-9]{64}",
         r"Authorization:\s*[^\s]+",
         r"x-api-key:\s*[^\s]+",
         r"api-key:\s*[^\s]+",

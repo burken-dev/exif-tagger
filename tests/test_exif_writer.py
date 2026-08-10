@@ -8,8 +8,7 @@ import pytest
 
 from exif_tagger.exif_writer import (
     get_existing_xptags,
-    tag_image_exif,
-    write_xptags,
+    set_xptags,
 )
 
 
@@ -63,80 +62,60 @@ class TestGetExistingXptags:
         assert result == set()
 
 
-class TestWriteXptags:
+class TestSetXptags:
     """Test writing XPTags to image files via PIL."""
 
     def test_write_single_tag(self, tmp_path):
         """Writing one tag should persist and be readable back."""
         img = _make_jpeg_with_exif(tmp_path)
 
-        modified, count = write_xptags(img, ["landscape"])
+        modified = set_xptags(img, ["landscape"])
 
         assert modified is True
-        assert count == 1
         result = get_existing_xptags(img)
         assert result == {"landscape"}
 
-    def test_append_mode_keeps_existing(self, tmp_path):
-        """Writing new tags should preserve already-existing ones."""
+    def test_set_overwrites_existing(self, tmp_path):
+        """set_xptags writes exactly the given set, replacing previous tags."""
         img = _make_jpeg_with_exif(tmp_path)
 
-        modified, count = write_xptags(img, ["landscape"])
-        assert modified is True and count == 1
-
-        modified, count = write_xptags(img, ["portrait"])
-        assert modified is True and count == 1
+        set_xptags(img, ["landscape"])
+        set_xptags(img, ["portrait"])
 
         result = get_existing_xptags(img)
-        assert result == {"landscape", "portrait"}
+        assert result == {"portrait"}
 
-    def test_no_duplicate_writes(self, tmp_path):
-        """Writing tags that already exist should not modify the file."""
+    def test_rewrite_is_idempotent(self, tmp_path):
+        """Rewriting the same tag set should still succeed."""
+        img = _make_jpeg_with_exif(tmp_path)
+
+        assert set_xptags(img, ["landscape"]) is True
+        assert set_xptags(img, ["landscape"]) is True
+
+    def test_empty_tag_list_clears(self, tmp_path):
+        """Passing an empty tag list should clear existing XPTags."""
         img = _make_jpeg_with_exif(tmp_path, xptags="landscape")
+        modified = set_xptags(img, [])
+        assert modified is True
+        assert get_existing_xptags(img) == set()
 
-        modified, count = write_xptags(img, ["landscape"])
-
-        assert modified is False
-        assert count == 0
-
-    def test_empty_tag_list(self, tmp_path):
-        """Passing an empty tag list should return (False, 0)."""
-        img = _make_jpeg_with_exif(tmp_path)
-        modified, count = write_xptags(img, [])
-        assert modified is False and count == 0
-
-    def test_case_insensitive_dedup(self, tmp_path):
-        """Writing a tag with different case should not create a duplicate."""
+    def test_case_insensitive(self, tmp_path):
+        """Writing a tag with uppercase should be stored lowercase."""
         img = _make_jpeg_with_exif(tmp_path)
 
-        write_xptags(img, ["Landscape"])
+        set_xptags(img, ["LANDSCAPE"])
         result = get_existing_xptags(img)
         assert "landscape" in result
 
-        modified, count = write_xptags(img, ["LANDSCAPE"])
-        assert modified is False and count == 0
 
-
-class TestTagImageExif:
-    """Test the convenience wrapper tag_image_exif."""
-
-    def test_wrapper_works(self, tmp_path):
-        """tag_image_exif should behave identically to write_xptags."""
-        img = _make_jpeg_with_exif(tmp_path)
-
-        modified, count = tag_image_exif(img, ["landscape"])
-
-        assert modified is True and count == 1
-
-
-class TestWriteXptagsIntegrity:
+class TestSetXptagsIntegrity:
     """Test that writes preserve image integrity."""
 
     def test_write_preserves_image(self, tmp_path):
         """After writing XPTags the image should still be valid."""
         img = _make_jpeg_with_exif(tmp_path)
 
-        write_xptags(img, ["landscape"])
+        set_xptags(img, ["landscape"])
 
         from PIL import Image as PILImage
 
@@ -180,13 +159,13 @@ class TestPathValidation:
         assert result == set()
 
     def test_write_returns_false_on_validation_error(self, tmp_path):
-        """write_xptags should return (False, 0) when path validation fails."""
+        """set_xptags should return False when path validation fails."""
         fake_path = tmp_path / "does_not_exist.jpg"
-        modified, count = write_xptags(fake_path, base_dir=tmp_path, new_tags_to_add=["tag"])
-        assert modified is False and count == 0
+        modified = set_xptags(fake_path, base_dir=tmp_path, tags=["tag"])
+        assert modified is False
 
 
-class TestWriteXptagsErrorHandling:
+class TestSetXptagsErrorHandling:
     """Test error handling when writes fail."""
 
     def test_write_to_unreadable_file(self, tmp_path):
@@ -194,5 +173,5 @@ class TestWriteXptagsErrorHandling:
         bad_file = tmp_path / "not_a_real_image.jpg"
         bad_file.write_bytes(b"\x00\x01\x02\x03")
 
-        with pytest.raises(RuntimeError, match="Failed to write XPTags"):
-            write_xptags(bad_file, ["landscape"])
+        with pytest.raises(RuntimeError, match="Failed to set XPTags"):
+            set_xptags(bad_file, ["landscape"])

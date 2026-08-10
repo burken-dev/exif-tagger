@@ -103,9 +103,6 @@ export const FolderSelectModal: React.FC<FolderSelectModalProps> = ({
                     </span>
                   </div>
                   <div className="flex items-center gap-1.5 shrink-0">
-                    <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-secondary text-secondary-foreground">
-                      {f.image_count}
-                    </span>
                     <Button
                       type="button"
                       variant="ghost"

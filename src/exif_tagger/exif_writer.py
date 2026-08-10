@@ -98,82 +98,6 @@ def get_existing_xptags(image_path: Path, base_dir: Path | None = None) -> set[s
         return set()
 
 
-def write_xptags(
-    image_path: Path,
-    new_tags_to_add: list[str],
-    base_dir: Path | None = None,
-) -> tuple[bool, int]:
-    """Write new tags to the XPTags field of an image (append mode).
-
-    SECURITY: Validates all paths before use to prevent path traversal attacks.
-    Uses PIL for in-place EXIF modification — no external tools required.
-
-    Args:
-        image_path: Path to the image file
-        new_tags_to_add: List of tag name strings to add (if not already present)
-        base_dir: Optional base directory for path validation (production mode)
-
-    Returns:
-        Tuple of (was_modified, number_of_new_tags_written)
-    """
-    # Validate path before use (graceful degradation on failure)
-    try:
-        validated_path = _validate_image_path(image_path, base_dir)
-    except (ValueError, FileNotFoundError) as exc:
-        logger.debug("Path validation for '%s': %s", image_path, exc)
-        # For tests without base_dir, use resolved path; for production with base_dir, fail gracefully
-        if base_dir is not None:
-            return False, 0
-        validated_path = image_path.resolve()
-
-    if not new_tags_to_add:
-        return False, 0
-
-    # Read existing tags for deduplication
-    existing = get_existing_xptags(validated_path, base_dir)
-    lower_existing = {t.lower() for t in existing}
-    truly_new = [tag for tag in new_tags_to_add if tag.lower() not in lower_existing]
-
-    if not truly_new:
-        logger.debug(
-            "All %d new tags already present on %s – nothing to write",
-            len(new_tags_to_add),
-            validated_path.name,
-        )
-        return False, 0
-
-    # Build combined tag list (existing + new) and sort for consistency
-    merged = existing | {t.lower() for t in truly_new}
-    tags_str = ";".join(sorted(merged))
-
-    try:
-        from PIL import Image as PILImage
-
-        with PILImage.open(str(validated_path)) as img:
-            exif_data = img.getexif()
-            utf16le_value = tags_str.encode("utf-16-le") + b"\x00\x00"  # null-terminated
-            exif_data[40094] = utf16le_value
-
-            # Write EXIF bytes back to the same file
-            save_fmt = img.format or ("HEIF" if validated_path.suffix.lower() in (".heic", ".heif") else None)
-            img.save(str(validated_path), format=save_fmt, exif=exif_data.tobytes())
-
-        # Verify integrity after write
-        _verify_image_integrity(validated_path)
-
-        logger.debug(
-            "Wrote %d new XPTags to %s (total now: %d)",
-            len(truly_new),
-            validated_path.name,
-            len(merged),
-        )
-        return True, len(truly_new)
-
-    except Exception as exc:
-        logger.error("Failed to write XPTags to %s: %s", validated_path.name, exc)
-        raise RuntimeError(f"Failed to write XPTags to {validated_path}: {exc}") from exc
-
-
 def set_xptags(
     image_path: Path,
     tags: list[str] | set[str],
@@ -220,26 +144,6 @@ def set_xptags(
     except Exception as exc:
         logger.error("Failed to set XPTags on %s: %s", validated_path.name, exc)
         raise RuntimeError(f"Failed to set XPTags on {validated_path}: {exc}") from exc
-
-
-def tag_image_exif(
-    image_path: Path,
-    matched_tag_names: list[str],
-    base_dir: Path | None = None,
-) -> tuple[bool, int]:
-    """Convenience wrapper that writes all matched tags to the image.
-
-    SECURITY: Passes base_dir through to write_xptags for path validation.
-
-    Args:
-        image_path: The image file to modify
-        matched_tag_names: All tag names that should be on this image (from AI response)
-        base_dir: Optional base directory for path validation
-
-    Returns:
-        Tuple of (was_modified, number_of_new_tags_written)
-    """
-    return write_xptags(image_path, matched_tag_names, base_dir)
 
 
 def _verify_image_integrity(image_path: Path) -> None:

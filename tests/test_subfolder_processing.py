@@ -37,11 +37,10 @@ def test_subfolder_processing_does_not_clear_db(tmp_path: Path, monkeypatch):
     sync_stats = sync_gallery_index(root_directory=gallery_dir, db_path=db_path)
     assert sync_stats["total"] == 2
 
-    # Verify initial gallery folder counts
+    # Verify initial gallery folder structure
     folders_info = get_gallery_folders(db_path=db_path, root_directory=gallery_dir)
-    folder_counts = {f["name"]: f["image_count"] for f in folders_info["folders"]}
-    assert folder_counts.get("folder1") == 1
-    assert folder_counts.get("folder2") == 1
+    folder_names = {f["name"] for f in folders_info["folders"]}
+    assert folder_names == {"folder1", "folder2"}
 
     # Step 2: Run processing on subfolder1
     config_file = tmp_path / "config.yaml"
@@ -79,11 +78,10 @@ tags:
     assert "folder1/image1.jpg" in rel_paths
     assert "folder2/image2.jpg" in rel_paths
 
-    # Verify folder browser counts remain 1 for each folder
+    # Verify folder browser structure still lists both folders
     folders_info_after = get_gallery_folders(db_path=db_path, root_directory=gallery_dir)
-    folder_counts_after = {f["name"]: f["image_count"] for f in folders_info_after["folders"]}
-    assert folder_counts_after.get("folder1") == 1, f"folder1 count is {folder_counts_after.get('folder1')}"
-    assert folder_counts_after.get("folder2") == 1, f"folder2 count is {folder_counts_after.get('folder2')}"
+    folder_names_after = {f["name"] for f in folders_info_after["folders"]}
+    assert folder_names_after == {"folder1", "folder2"}
 
 
 def test_subfolder_processing_with_slash_prefix(tmp_path: Path, monkeypatch):

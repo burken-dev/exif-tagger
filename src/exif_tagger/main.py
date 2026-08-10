@@ -329,17 +329,24 @@ class PipelineEngine:
                 exclude_patterns=config.exclude_patterns or [],
             )
 
+            from exif_tagger.image_scanner import scan_images
+
             if target_subfolder:
-                conn = get_connection()
-                try:
-                    clean_sub = target_subfolder.replace("\\", "/").strip("/").lower()
-                    row = conn.execute(
-                        "SELECT COUNT(*) FROM images WHERE LOWER(REPLACE(relative_path, '\\', '/')) LIKE ? OR LOWER(REPLACE(relative_path, '\\', '/')) = ?",
-                        (f"{clean_sub}/%", clean_sub),
-                    ).fetchone()
-                    total_found = row[0] if row else 0
-                finally:
-                    conn.close()
+                sub_dir = (base_gallery_root / target_subfolder).resolve()
+                if sub_dir.exists() and sub_dir.is_dir():
+                    scanned_sub = scan_images(sub_dir, exclude_patterns=config.exclude_patterns or [])
+                    total_found = len(scanned_sub)
+                else:
+                    conn = get_connection()
+                    try:
+                        clean_sub = target_subfolder.replace("\\", "/").strip("/").lower()
+                        row = conn.execute(
+                            "SELECT COUNT(*) FROM images WHERE LOWER(REPLACE(relative_path, '\\', '/')) LIKE ? OR LOWER(REPLACE(relative_path, '\\', '/')) = ?",
+                            (f"{clean_sub}/%", clean_sub),
+                        ).fetchone()
+                        total_found = row[0] if row else 0
+                    finally:
+                        conn.close()
             else:
                 total_found = sync_stats.get("total", 0)
 
@@ -370,10 +377,12 @@ class PipelineEngine:
             images_to_process = [Path(p) for p in images_candidates_map.keys()]
 
             logger.info(
-                "%d total images, %d require vision model evaluation.",
+                "%d total images in folder, %d require vision model evaluation.",
                 total_found,
                 len(images_to_process),
             )
+
+            session_total = min(total_found, max_images) if (max_images and max_images > 0) else total_found
 
             if not images_to_process:
                 summary = {
@@ -386,11 +395,11 @@ class PipelineEngine:
                     "failed": 0,
                     "errors": [],
                 }
-                self.state.start(total_found)
+                self.state.start(session_total)
                 self.state.finish(summary)
                 return summary
 
-            self.state.start(len(images_to_process))
+            self.state.start(session_total)
 
             successfully_tagged = 0
             failed_count = 0

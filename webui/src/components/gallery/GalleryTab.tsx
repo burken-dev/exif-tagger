@@ -53,7 +53,22 @@ export const GalleryTab: React.FC = () => {
 
   const { showToast } = useToast();
   const [isFolderModalOpen, setIsFolderModalOpen] = useState(false);
-  const [showManagementPanels, setShowManagementPanels] = useState(true);
+  const [showManagementPanels, setShowManagementPanels] = useState<boolean>(() => {
+    try {
+      const stored = localStorage.getItem('gallery.showManagementPanels');
+      return stored !== null ? stored === 'true' : true;
+    } catch {
+      return true;
+    }
+  });
+
+  const handleToggleManagementPanels = () => {
+    setShowManagementPanels(prev => {
+      const next = !prev;
+      try { localStorage.setItem('gallery.showManagementPanels', String(next)); } catch {}
+      return next;
+    });
+  };
 
   const hasActiveFilters = Boolean(currentFolder || searchQuery || selectedTags.size > 0);
   const hasNonFolderFilters = Boolean(searchQuery || selectedTags.size > 0);
@@ -137,7 +152,7 @@ export const GalleryTab: React.FC = () => {
                 type="button"
                 variant="outline"
                 size="sm"
-                onClick={() => setShowManagementPanels((prev) => !prev)}
+                onClick={handleToggleManagementPanels}
                 className="flex items-center gap-2 h-9"
               >
                 <SlidersHorizontal className="w-4 h-4" />

@@ -9,6 +9,7 @@ import { FolderSelectModal } from '@/components/gallery/FolderSelectModal';
 export const ProcessingTab: React.FC = () => {
   const {
     isRunning,
+    rootDirectory,
     folderPath,
     maxImages,
     processedCount,
@@ -68,6 +69,7 @@ export const ProcessingTab: React.FC = () => {
   return (
     <div className="space-y-6">
       <SessionCard
+        rootDirectory={rootDirectory}
         folderPath={folderPath}
         onFolderPathChange={setFolderPath}
         onBrowseFolders={handleBrowseFolders}

@@ -3,8 +3,22 @@ import type { LogItem, ProcessingStatus, FolderItem, FolderBreadcrumb, FoldersRe
 
 export function useProcessing() {
   const [isRunning, setIsRunning] = useState<boolean>(false);
-  const [folderPath, setFolderPath] = useState<string>('');
-  const [maxImages, setMaxImages] = useState<number | null>(null);
+  const [rootDirectory, setRootDirectory] = useState<string>('');
+  const [folderPath, setFolderPathState] = useState<string>(() => {
+    try {
+      return localStorage.getItem('exif_tagger_processing_folderPath') || '';
+    } catch {
+      return '';
+    }
+  });
+  const [maxImages, setMaxImagesState] = useState<number | null>(() => {
+    try {
+      const v = localStorage.getItem('exif_tagger_processing_maxImages');
+      return v !== null ? parseInt(v, 10) : null;
+    } catch {
+      return null;
+    }
+  });
   const [processedCount, setProcessedCount] = useState<number>(0);
   const [totalCount, setTotalCount] = useState<number>(0);
   const [progressPct, setProgressPct] = useState<number>(0);
@@ -18,6 +32,56 @@ export function useProcessing() {
 
   const lastProcessedLogIdRef = useRef<number>(0);
   const pollTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Fetch root_directory from config
+  useEffect(() => {
+    fetch('/api/config')
+      .then((res) => res.json())
+      .then((data) => {
+        if (data && data.root_directory) {
+          setRootDirectory(data.root_directory);
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  const setFolderPath = useCallback((path: string) => {
+    try {
+      localStorage.setItem('exif_tagger_processing_folderPath', path);
+    } catch {}
+    setFolderPathState(path);
+  }, []);
+
+  const setMaxImages = useCallback((max: number | null) => {
+    try {
+      if (max === null || isNaN(max)) {
+        localStorage.removeItem('exif_tagger_processing_maxImages');
+      } else {
+        localStorage.setItem('exif_tagger_processing_maxImages', String(max));
+      }
+    } catch {}
+    setMaxImagesState(max);
+  }, []);
+
+  // Fetch folder image count preview on folderPath change when not running
+  useEffect(() => {
+    if (isRunning) return;
+    let cancelled = false;
+    const url = `/api/gallery/images?limit=1${folderPath ? `&folder=${encodeURIComponent(folderPath)}` : ''}`;
+    fetch(url)
+      .then((res) => res.json())
+      .then((data) => {
+        if (!cancelled && typeof data.total === 'number') {
+          setTotalCount(data.total);
+          setProcessedCount(0);
+          setProgressPct(0);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [folderPath, isRunning]);
 
   const fetchStatus = useCallback(async () => {
     try {
@@ -176,6 +240,7 @@ export function useProcessing() {
 
   return {
     isRunning,
+    rootDirectory,
     folderPath,
     maxImages,
     processedCount,

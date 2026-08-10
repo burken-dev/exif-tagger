@@ -71,14 +71,16 @@ export function useGallery() {
       const parsedPage = parseInt(params.get('page') || '1', 10);
       setCurrentPage(isNaN(parsedPage) || parsedPage < 1 ? 1 : parsedPage);
 
-      const parsedLimit = parseInt(params.get('limit') || '48', 10);
+      const storedPageSize = parseInt(localStorage.getItem('gallery.pageSize') || '48', 10);
+      const parsedLimit = parseInt(params.get('limit') || String(storedPageSize), 10);
       setPageSize(isNaN(parsedLimit) || parsedLimit < 1 ? 48 : parsedLimit);
     } else {
       setCurrentFolder('');
       setSearchQuery('');
       setSelectedTags(new Set());
       setCurrentPage(1);
-      setPageSize(48);
+      const storedPageSizeFallback = parseInt(localStorage.getItem('gallery.pageSize') || '48', 10);
+      setPageSize(isNaN(storedPageSizeFallback) || storedPageSizeFallback < 1 ? 48 : storedPageSizeFallback);
     }
 
     setTimeout(() => {
@@ -509,6 +511,11 @@ export function useGallery() {
     setCurrentPage(1);
   }, []);
 
+  const handleSetPageSize = useCallback((size: number) => {
+    try { localStorage.setItem('gallery.pageSize', String(size)); } catch {}
+    setPageSize(size);
+  }, []);
+
   return {
     images,
     allTags,
@@ -546,6 +553,6 @@ export function useGallery() {
     setModalFolder,
     setSearchQuery: handleSetSearchQuery,
     setCurrentPage,
-    setPageSize,
+    setPageSize: handleSetPageSize,
   };
 }

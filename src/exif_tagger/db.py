@@ -377,6 +377,9 @@ def get_gallery_images(
             db_map[str(abs_p)] = r
             db_map[raw_fp] = r
             db_map[r["relative_path"]] = r
+            rel_p = Path(r["relative_path"])
+            rel_abs = (root_path / rel_p).resolve()
+            db_map[str(rel_abs)] = r
 
         unique_db_rows = {r["id"]: r for r in db_map.values()}
         found_ids = list(unique_db_rows.keys())

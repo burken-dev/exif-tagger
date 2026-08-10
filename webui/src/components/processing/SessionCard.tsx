@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Folder, FolderOpen, Play, Square, Hash } from 'lucide-react';
 
 export interface SessionCardProps {
+  rootDirectory?: string;
   folderPath: string;
   onFolderPathChange: (path: string) => void;
   onBrowseFolders: () => void;
@@ -16,6 +17,7 @@ export interface SessionCardProps {
 }
 
 export const SessionCard: React.FC<SessionCardProps> = ({
+  rootDirectory,
   folderPath,
   onFolderPathChange,
   onBrowseFolders,
@@ -32,6 +34,14 @@ export const SessionCard: React.FC<SessionCardProps> = ({
     }
   };
 
+  const handleFolderPathChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    let val = e.target.value;
+    if (rootDirectory && val.startsWith(rootDirectory)) {
+      val = val.substring(rootDirectory.length).replace(/^[\/\\]+/, '');
+    }
+    onFolderPathChange(val);
+  };
+
   const handleMaxImagesChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = e.target.value;
     if (val === '') {
@@ -41,6 +51,10 @@ export const SessionCard: React.FC<SessionCardProps> = ({
       onMaxImagesChange(isNaN(num) ? null : Math.max(1, num));
     }
   };
+
+  const displayRootPrefix = rootDirectory
+    ? `${rootDirectory.replace(/[\/\\]+$/, '')}/`
+    : '';
 
   return (
     <Card className="border-border shadow-sm">
@@ -62,15 +76,22 @@ export const SessionCard: React.FC<SessionCardProps> = ({
                 Folder Path
               </label>
               <div className="flex gap-2">
-                <Input
-                  id="folderPath"
-                  type="text"
-                  value={folderPath}
-                  onChange={(e) => onFolderPathChange(e.target.value)}
-                  placeholder="/data/images/this-month"
-                  disabled={isRunning}
-                  className="flex-1"
-                />
+                <div className="flex flex-1 items-center rounded-md border border-input bg-background focus-within:ring-2 focus-within:ring-ring focus-within:ring-offset-2 overflow-hidden">
+                  {displayRootPrefix && (
+                    <span className="px-2.5 py-1.5 text-xs font-mono text-muted-foreground bg-muted border-r border-border shrink-0 select-none">
+                      {displayRootPrefix}
+                    </span>
+                  )}
+                  <Input
+                    id="folderPath"
+                    type="text"
+                    value={folderPath}
+                    onChange={handleFolderPathChange}
+                    placeholder="subfolder (leave empty for root)"
+                    disabled={isRunning}
+                    className="flex-1 border-0 focus-visible:ring-0 focus-visible:ring-offset-0 rounded-none"
+                  />
+                </div>
                 <Button
                   type="button"
                   variant="outline"
@@ -84,7 +105,7 @@ export const SessionCard: React.FC<SessionCardProps> = ({
                 </Button>
               </div>
               <p className="text-xs text-muted-foreground">
-                Target directory path containing images to process.
+                Subdirectory relative to gallery root to process.
               </p>
             </div>
 

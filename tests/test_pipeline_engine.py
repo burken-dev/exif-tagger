@@ -40,8 +40,8 @@ class TestProcessingState:
         state.update_progress("photo.jpg")
         assert state.processed == 1
         assert state.current_image == "photo.jpg"
-        assert len(state.log_lines) == 1
-        assert "[1/10] Processed: photo.jpg" in state.log_lines[0]
+        assert len(state.get_logs()) == 1
+        assert "[1/10] Processed: photo.jpg" in state.get_logs()[0]["text"]
 
     def test_update_multiple_images(self):
         from exif_tagger.main import ProcessingState
@@ -51,19 +51,19 @@ class TestProcessingState:
         for name in ["a.jpg", "b.jpg", "c.jpg"]:
             state.update_progress(name)
         assert state.processed == 3
-        assert len(state.log_lines) == 3
+        assert len(state.get_logs()) == 3
 
-    def test_log_lines_retain_last_200(self):
+    def test_logs_cap_at_500(self):
         from exif_tagger.main import ProcessingState
 
         state = ProcessingState()
-        state.start(500)
-        for i in range(300):
+        state.start(600)
+        for i in range(600):
             state.update_progress(f"img_{i}.jpg")
-        log = state.log_lines
-        assert len(log) == 200
-        # Should contain last 200 entries (100-299), not the first 100
-        assert "img_99.jpg" not in "".join(log[-5:])
+        log = state.get_logs()
+        assert len(log) == 500
+        # Should contain the last 500 entries, not the first 100
+        assert "img_99.jpg" not in "".join(e["text"] for e in log[-5:])
 
     def test_set_stop_requested(self):
         from exif_tagger.main import ProcessingState
@@ -100,13 +100,13 @@ class TestProcessingState:
         # total stays 0 after __init__
         assert state.progress_pct == 0.0
 
-    def test_processing_state_log_lines_returns_copy(self):
-        """log_lines should return a copy so mutation doesn't affect internal state."""
+    def test_processing_state_get_logs_returns_copy(self):
+        """get_logs should return a copy so mutation doesn't affect internal state."""
         from exif_tagger.main import ProcessingState
 
         state = ProcessingState()
-        lines1 = state.log_lines
-        lines2 = state.log_lines
+        lines1 = state.get_logs()
+        lines2 = state.get_logs()
         assert id(lines1) != id(lines2), "Should return different list objects"
 
     def test_processing_state_finish_resets_current_image(self):
@@ -225,12 +225,12 @@ class TestPipelineEngineBasicAPIs:
         assert "progressPct" in status
         assert "stopRequested" in status
 
-    def test_get_summary_before_session_is_none(self):
+    def test_summary_before_session_is_none(self):
         """Before start_session(), summary should be None."""
         from exif_tagger.main import PipelineEngine
 
         engine = PipelineEngine(config_path="config.yaml")
-        assert engine.get_summary() is None
+        assert engine.state.summary is None
 
     def test_stop_returns_status_dict_with_processed_key(self):
         """Calling stop() on an unstarted engine returns a dict with status and processed."""
@@ -275,9 +275,7 @@ class TestPipelineEngineIntegration:
         mock_response.results = [TagResult(tag_name="dog", score=0.9)]
 
         def fake_exif(img_path, matched_names):
-            if not matched_names:
-                return False, 0
-            return True, len(matched_names)
+            return bool(matched_names)
 
         class MockConfig:
             root_directory: str = str(images_dir)
@@ -294,18 +292,15 @@ class TestPipelineEngineIntegration:
 
         with patch("exif_tagger.config.load_config", return_value=MockConfig()):
             with patch("exif_tagger.image_scanner.scan_images", return_value=created_paths):
-                with patch(
-                    "exif_tagger.image_scanner.filter_by_checkpoint", side_effect=lambda imgs, cp: (list(imgs), 0)
-                ):
-                    with patch("exif_tagger.config.get_resume_info", return_value=None):
-                        with patch("exif_tagger.ai_client.setup_secure_logging"):
-                            with patch("exif_tagger.ai_client.tag_image_with_ai", return_value=mock_response):
-                                with patch("exif_tagger.exif_writer.tag_image_exif", side_effect=fake_exif):
-                                    with patch("exif_tagger.config.save_checkpoint"):
-                                        with patch("exif_tagger.db.update_image_in_db_from_file"):
-                                            engine = PipelineEngine(config_path="config.yaml")
-                                            summary = engine.start_session(max_images=max_images)
-                                            return engine, summary
+                with patch("exif_tagger.config.get_resume_info", return_value=None):
+                    with patch("exif_tagger.ai_client.setup_secure_logging"):
+                        with patch("exif_tagger.ai_client.tag_image_with_ai", return_value=mock_response):
+                            with patch("exif_tagger.exif_writer.set_xptags", side_effect=fake_exif):
+                                with patch("exif_tagger.config.save_checkpoint"):
+                                    with patch("exif_tagger.db.update_image_in_db_from_file"):
+                                        engine = PipelineEngine(config_path="config.yaml")
+                                        summary = engine.start_session(max_images=max_images)
+                                        return engine, summary
 
     def test_start_session_processes_all_images(self, tmp_path):
         """start_session should process all images and return a summary."""
@@ -410,18 +405,13 @@ class TestRunFunction:
             ),
         ):
             with patch("exif_tagger.image_scanner.scan_images", return_value=[p1]):
+                with patch("exif_tagger.config.get_resume_info", return_value=None):
+                    mock_engine = MagicMock()
+                    mock_engine.start_session.return_value = mock_summary
 
-                def fake_filter(images, checkpoint):
-                    return list(images), 0
+                    # Patch PipelineEngine constructor to use our mock
 
-                with patch("exif_tagger.image_scanner.filter_by_checkpoint", side_effect=fake_filter):
-                    with patch("exif_tagger.config.get_resume_info", return_value=None):
-                        mock_engine = MagicMock()
-                        mock_engine.start_session.return_value = mock_summary
-
-                        # Patch PipelineEngine constructor to use our mock
-
-                        original_pipeline_class = None  # We'll patch directly in the module
+                    original_pipeline_class = None  # We'll patch directly in the module
 
     def test_run_returns_exit_code_from_errors(self):
         """run() should return exit code 1 when summary has errors."""

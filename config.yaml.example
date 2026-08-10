@@ -54,6 +54,12 @@ tags:
     description: "Abstract art, patterns, textures without clear subject matter"
     threshold: 0.5
 
+# Background gallery index poller — keeps the SQLite gallery index in sync with the
+# filesystem without scanning the whole library on every request.
+gallery_index:
+  enabled: true
+  poll_interval_seconds: 10   # 0 disables the poller
+
 # Regex patterns for file/directory paths to exclude from processing.
 # Example: skip hidden directories and thumbnail folders.
 exclude_patterns:

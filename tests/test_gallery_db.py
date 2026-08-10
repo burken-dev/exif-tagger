@@ -56,6 +56,20 @@ class TestGalleryDatabase:
         init_db(test_db_path)
         assert test_db_path.exists()
 
+    def test_init_db_creates_dir_mtimes_and_exif_mtime(self, test_db_path):
+        from exif_tagger.db import get_connection, init_db
+
+        init_db(test_db_path)
+        conn = get_connection(test_db_path)
+        try:
+            tables = {r["name"] for r in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'")}
+            assert "dir_mtimes" in tables
+            cols = {r["name"] for r in conn.execute("PRAGMA table_info(images)")}
+            assert "exif_mtime" in cols
+        finally:
+            conn.close()
+
     def test_sync_gallery_index(self, test_db_path, image_gallery_dir):
         gallery_dir, img_paths = image_gallery_dir
 
@@ -173,39 +187,29 @@ def test_get_db_path_db_file_override(monkeypatch, tmp_path):
 
 
 def test_get_gallery_images_filesystem_unindexed(tmp_path):
-    from exif_tagger.db import get_gallery_images, init_db, sync_single_image
+    """Every file on disk is discovered (with an id) once the index is reconciled."""
+    from exif_tagger.db import get_gallery_images, init_db, reconcile_gallery_index
 
     db_path = tmp_path / "test.db"
     init_db(db_path)
 
-    # Create dummy images on disk
     img1 = tmp_path / "a.jpg"
     img2 = tmp_path / "sub" / "b.png"
     img2.parent.mkdir(parents=True, exist_ok=True)
     img1.write_bytes(b"dummy")
     img2.write_bytes(b"dummy")
 
-    # Call get_gallery_images without tags (should list both from disk even though DB is empty)
+    reconcile_gallery_index(tmp_path, db_path=db_path)
     images, total = get_gallery_images(db_path=db_path, root_directory=tmp_path)
     assert total == 2
+    assert all(img["id"] is not None for img in images)
+    assert all(img["indexed"] is True for img in images)
     assert images[0]["filename"] == "a.jpg"
-    assert images[0]["indexed"] is False
-    assert images[0]["id"] is None
     assert images[1]["relative_path"] == "sub/b.png"
-
-    # Test sync_single_image
-    synced = sync_single_image("a.jpg", db_path=db_path, root_directory=tmp_path)
-    assert synced["indexed"] is True
-    assert synced["id"] is not None
-
-    # Query again: a.jpg should now be indexed, sub/b.png unindexed
-    images, total = get_gallery_images(db_path=db_path, root_directory=tmp_path)
-    assert images[0]["indexed"] is True
-    assert images[1]["indexed"] is False
 
 
 def test_get_gallery_images_untagged_folder_and_search(tmp_path):
-    from exif_tagger.db import get_gallery_images, init_db
+    from exif_tagger.db import get_gallery_images, init_db, reconcile_gallery_index
 
     db_path = tmp_path / "test.db"
     init_db(db_path)
@@ -220,18 +224,16 @@ def test_get_gallery_images_untagged_folder_and_search(tmp_path):
     sub2.mkdir()
     (sub2 / "other.jpg").write_bytes(b"dummy")
 
-    # Folder filter test
+    reconcile_gallery_index(tmp_path, db_path=db_path)
+
     images, total = get_gallery_images(db_path=db_path, folder="folder1", root_directory=tmp_path)
     assert total == 2
-    filenames = [img["filename"] for img in images]
-    assert filenames == ["img1.jpg", "photo2.png"]
+    assert [img["filename"] for img in images] == ["img1.jpg", "photo2.png"]
 
-    # Search filter test (glob)
     images_glob, total_glob = get_gallery_images(db_path=db_path, search="*.png", root_directory=tmp_path)
     assert total_glob == 1
     assert images_glob[0]["filename"] == "photo2.png"
 
-    # Search filter test (substring)
     images_sub, total_sub = get_gallery_images(db_path=db_path, search="img1", root_directory=tmp_path)
     assert total_sub == 1
     assert images_sub[0]["filename"] == "img1.jpg"
@@ -329,3 +331,249 @@ def test_sync_gallery_index_with_relative_db_paths(tmp_path):
     assert len(rows) == 1
     assert rows[0]["id"] == original_id, f"Expected id {original_id}, got {rows[0]['id']}"
     assert stats["deleted"] == 0
+
+
+def test_sync_extracts_exif_when_exif_mtime_null(tmp_path):
+    """A row inserted by the poller (exif_mtime NULL) still gets EXIF tags."""
+    import os
+
+    from exif_tagger.db import get_connection, init_db, reconcile_gallery_index, sync_gallery_index
+
+    db_path = tmp_path / "test.db"
+    init_db(db_path)
+    gallery_dir = tmp_path / "gallery"
+    gallery_dir.mkdir()
+    img = gallery_dir / "photo.jpg"
+    img_ = PILImage.new("RGB", (50, 50), color="blue")
+    img_.save(img)
+    set_xptags(img, ["nature"])
+
+    # Discovery-only pass: inserts the row, must NOT read EXIF.
+    reconcile_gallery_index(gallery_dir, db_path=db_path)
+    conn = get_connection(db_path)
+    try:
+        row = conn.execute("SELECT id, exif_mtime FROM images").fetchone()
+        assert row["exif_mtime"] is None
+        img_id = row["id"]
+    finally:
+        conn.close()
+
+    sync_gallery_index(gallery_dir, db_path=db_path)
+
+    conn = get_connection(db_path)
+    try:
+        tags = [r["tag_name"] for r in conn.execute(
+            "SELECT tag_name FROM image_tags WHERE image_id = ?", (img_id,))]
+        mtime = conn.execute("SELECT exif_mtime FROM images WHERE id = ?", (img_id,)).fetchone()["exif_mtime"]
+    finally:
+        conn.close()
+
+    assert tags == ["nature"]
+    assert abs(mtime - os.stat(img).st_mtime) < 0.001
+
+
+def test_sync_second_run_is_skip_no_re_extract(tmp_path):
+    """A second sync with unchanged mtime must not re-read EXIF or rewrite tags."""
+    from exif_tagger.db import get_connection, init_db, sync_gallery_index
+
+    db_path = tmp_path / "test.db"
+    init_db(db_path)
+    gallery_dir = tmp_path / "gallery"
+    gallery_dir.mkdir()
+    img = gallery_dir / "photo.jpg"
+    PILImage.new("RGB", (50, 50), color="blue").save(img)
+    set_xptags(img, ["nature"])
+
+    stats1 = sync_gallery_index(gallery_dir, db_path=db_path)
+    # Simulate a manual tag the user added in the UI only (not in EXIF).
+    conn = get_connection(db_path)
+    img_id = conn.execute("SELECT id FROM images").fetchone()["id"]
+    conn.execute(
+        "INSERT INTO image_tags (image_id, tag_name, source) VALUES (?, 'useronly', 'manual_ui')",
+        (img_id,),
+    )
+    conn.commit()
+    conn.close()
+
+    stats2 = sync_gallery_index(gallery_dir, db_path=db_path)
+    assert stats2["updated"] == 0
+
+    conn = get_connection(db_path)
+    tags = {r["tag_name"] for r in conn.execute(
+        "SELECT tag_name FROM image_tags WHERE image_id = ?", (img_id,))}
+    conn.close()
+    assert tags == {"nature", "useronly"}  # nothing re-read, nothing wiped
+
+
+def test_sync_re_extracts_after_file_modification(tmp_path):
+    """Changing the file mtime triggers EXIF re-extraction."""
+    import os
+
+    from exif_tagger.db import get_connection, init_db, sync_gallery_index
+
+    db_path = tmp_path / "test.db"
+    init_db(db_path)
+    gallery_dir = tmp_path / "gallery"
+    gallery_dir.mkdir()
+    img = gallery_dir / "photo.jpg"
+    PILImage.new("RGB", (50, 50), color="blue").save(img)
+    set_xptags(img, ["nature"])
+
+    sync_gallery_index(gallery_dir, db_path=db_path)
+
+    set_xptags(img, ["architecture"])
+    new_mtime = img.stat().st_mtime + 5.0
+    os.utime(img, (new_mtime, new_mtime))
+
+    stats = sync_gallery_index(gallery_dir, db_path=db_path)
+    assert stats["updated"] == 1
+
+    conn = get_connection(db_path)
+    tags = {r["tag_name"] for r in conn.execute("SELECT tag_name FROM image_tags").fetchall()}
+    conn.close()
+    assert tags == {"architecture"}
+
+
+def test_update_image_in_db_from_file_gates_on_exif_mtime(tmp_path):
+    """update_image_in_db_from_file skips EXIF rewrite when exif_mtime matches."""
+    from exif_tagger.db import get_connection, init_db, update_image_in_db_from_file
+
+    db_path = tmp_path / "test.db"
+    init_db(db_path)
+    img = tmp_path / "single.jpg"
+    PILImage.new("RGB", (50, 50), color="yellow").save(img)
+    set_xptags(img, ["tag1"])
+
+    update_image_in_db_from_file(img, root_directory=tmp_path, db_path=db_path)
+    conn = get_connection(db_path)
+    img_id = conn.execute("SELECT id FROM images").fetchone()["id"]
+    conn.execute(
+        "INSERT INTO image_tags (image_id, tag_name, source) VALUES (?, 'useronly', 'manual_ui')",
+        (img_id,),
+    )
+    conn.commit()
+    conn.close()
+
+    update_image_in_db_from_file(img, root_directory=tmp_path, db_path=db_path)
+
+    conn = get_connection(db_path)
+    tags = {r["tag_name"] for r in conn.execute(
+        "SELECT tag_name FROM image_tags WHERE image_id = ?", (img_id,))}
+    conn.close()
+    assert tags == {"tag1", "useronly"}
+
+
+def test_update_image_tags_sets_exif_mtime(tmp_path):
+    import os
+
+    from exif_tagger.db import get_connection, init_db, sync_gallery_index, update_image_tags_in_db_and_exif
+
+    db_path = tmp_path / "test.db"
+    init_db(db_path)
+    gallery_dir = tmp_path / "gallery"
+    gallery_dir.mkdir()
+    img = gallery_dir / "photo.jpg"
+    PILImage.new("RGB", (50, 50), color="blue").save(img)
+    set_xptags(img, [])
+
+    sync_gallery_index(gallery_dir, db_path=db_path)
+    conn = get_connection(db_path)
+    img_id = conn.execute("SELECT id FROM images").fetchone()["id"]
+    conn.close()
+
+    assert update_image_tags_in_db_and_exif(img_id, ["edited"], db_path=db_path) is True
+
+    conn = get_connection(db_path)
+    row = conn.execute("SELECT last_modified, exif_mtime FROM images WHERE id = ?", (img_id,)).fetchone()
+    conn.close()
+    assert abs(row["exif_mtime"] - row["last_modified"]) < 0.001
+    assert abs(row["last_modified"] - os.stat(img).st_mtime) < 0.001
+
+
+def test_get_gallery_images_is_db_only(monkeypatch, tmp_path):
+    """Reads must never touch the filesystem."""
+    from exif_tagger.db import get_gallery_images, init_db, reconcile_gallery_index
+
+    db_path = tmp_path / "test.db"
+    init_db(db_path)
+    root = tmp_path / "gallery"
+    root.mkdir()
+    (root / "a.jpg").write_bytes(b"x")
+    reconcile_gallery_index(root, db_path=db_path)
+
+    def boom(*args, **kwargs):
+        raise AssertionError("filesystem must not be scanned during reads")
+
+    monkeypatch.setattr("exif_tagger.db.scan_images", boom)
+    images, total = get_gallery_images(db_path=db_path)
+    assert total == 1
+
+
+def test_get_gallery_images_folder_special_chars(tmp_path):
+    from exif_tagger.db import get_gallery_images, init_db, reconcile_gallery_index
+
+    db_path = tmp_path / "test.db"
+    init_db(db_path)
+    root = tmp_path / "gallery"
+    root.mkdir()
+    special = root / "50%_photos"
+    special.mkdir()
+    (special / "one.jpg").write_bytes(b"x")
+    reconcile_gallery_index(root, db_path=db_path)
+
+    images, total = get_gallery_images(db_path=db_path, folder="50%_photos")
+    assert total == 1
+    assert images[0]["filename"] == "one.jpg"
+
+
+def test_get_gallery_images_tag_and_semantics(tmp_path):
+    """Selecting multiple tags requires ALL of them (AND), not any."""
+    from exif_tagger.db import get_gallery_images, init_db, sync_gallery_index
+
+    db_path = tmp_path / "test.db"
+    init_db(db_path)
+    root = tmp_path / "gallery"
+    root.mkdir()
+    for name, tags in [("a.jpg", ["x", "y"]), ("b.jpg", ["x"]), ("c.jpg", ["y"])]:
+        p = root / name
+        PILImage.new("RGB", (20, 20)).save(p)
+        set_xptags(p, tags)
+    sync_gallery_index(root, db_path=db_path)
+
+    images, total = get_gallery_images(db_path=db_path, tags=["x", "y"])
+    assert total == 1
+    assert images[0]["filename"] == "a.jpg"
+
+
+def test_get_gallery_images_search_unicode_case(tmp_path):
+    from exif_tagger.db import get_gallery_images, init_db, reconcile_gallery_index
+
+    db_path = tmp_path / "test.db"
+    init_db(db_path)
+    root = tmp_path / "gallery"
+    root.mkdir()
+    (root / "Ångström.jpg").write_bytes(b"x")
+    reconcile_gallery_index(root, db_path=db_path)
+
+    images, total = get_gallery_images(db_path=db_path, search="ångström")
+    assert total == 1
+    images2, total2 = get_gallery_images(db_path=db_path, search="ÅNGSTRÖM")
+    assert total2 == 1
+
+
+def test_get_gallery_images_pagination(tmp_path):
+    from exif_tagger.db import get_gallery_images, init_db, reconcile_gallery_index
+
+    db_path = tmp_path / "test.db"
+    init_db(db_path)
+    root = tmp_path / "gallery"
+    root.mkdir()
+    for i in range(5):
+        (root / f"img{i}.jpg").write_bytes(b"x")
+    reconcile_gallery_index(root, db_path=db_path)
+
+    page1, total = get_gallery_images(db_path=db_path, offset=0, limit=2)
+    page2, _ = get_gallery_images(db_path=db_path, offset=2, limit=2)
+    assert total == 5
+    assert len(page1) == 2 and len(page2) == 2
+    assert {img["id"] for img in page1}.isdisjoint({img["id"] for img in page2})

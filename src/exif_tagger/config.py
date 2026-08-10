@@ -33,6 +33,8 @@ ENV_MAPPING: dict[str, tuple[str, ...]] = {
     "EXIFTAGGER_MAX_IMAGE_DIMENSION": ("max_image_dimension",),
     "EXIFTAGGER_LOG_LEVEL": ("log_level",),
     "EXIFTAGGER_LOG_DIR": ("log_dir",),
+    "EXIFTAGGER_GALLERY_INDEX_ENABLED": ("gallery_index", "enabled"),
+    "EXIFTAGGER_GALLERY_INDEX_POLL_INTERVAL_SECONDS": ("gallery_index", "poll_interval_seconds"),
 }
 
 

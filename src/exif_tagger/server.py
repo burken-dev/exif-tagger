@@ -208,12 +208,21 @@ def _setup_scheduler() -> None:
             except Exception as e:
                 logger.warning("Failed to add job for schedule '%s': %s", sid, e)
 
-# ---------------------------------------------------------------------------
-# Per-request cancellation state for gallery image queries
-# ---------------------------------------------------------------------------
-_gallery_cancel_callbacks: dict[str, callable] = {}
-_gallery_cancel_events: dict[str, threading.Event] = {}
-_cancel_event_lock = threading.Lock()
+    try:
+        cfg = load_config(CONFIG_PATH)
+        gidx = cfg.gallery_index
+        if gidx.enabled and gidx.poll_interval_seconds > 0:
+            _scheduler.add_job(
+                _run_gallery_poll,
+                trigger=IntervalTrigger(seconds=gidx.poll_interval_seconds, timezone=UTC),
+                id="gallery_index_poll",
+                replace_existing=True,
+                coalesce=True,
+                max_instances=1,
+            )
+            logger.info("Gallery index poller registered (every %ss)", gidx.poll_interval_seconds)
+    except Exception as exc:
+        logger.warning("Failed to register gallery index poller: %s", exc)
 
 
 @app.exception_handler(Exception)
@@ -443,6 +452,7 @@ from exif_tagger.db import (
     get_all_tags,
     get_gallery_images,
     get_image_by_id,
+    reconcile_gallery_index,
     remove_tag_globally,
     sync_gallery_index,
     sync_single_image,
@@ -534,8 +544,18 @@ def _run_gallery_sync(req: GallerySyncRequest = GallerySyncRequest()) -> None:
             _sync_state["error"] = str(e)
 
 
-def _sync_index_background() -> None:
-    _run_gallery_sync()
+def _run_gallery_poll() -> None:
+    """Periodic discovery reconcile. Skips the round if a manual sync is running."""
+    if not _sync_lock.acquire(blocking=False):
+        logger.debug("Gallery poll skipped: sync in progress")
+        return
+    try:
+        config = load_config(CONFIG_PATH)
+        reconcile_gallery_index(config.root_directory, exclude_patterns=config.exclude_patterns)
+    except Exception as exc:
+        logger.warning("Gallery poll failed: %s", exc)
+    finally:
+        _sync_lock.release()
 
 
 @app.post("/api/gallery/sync")
@@ -835,22 +855,6 @@ def ui_routes():
     return _get_index_response()
 
 
-@app.get("/css/style.css")
-def serve_css():
-    css_file = WEBUI_DIR / "css" / "style.css"
-    if css_file.exists():
-        return FileResponse(css_file)
-    return _get_index_response()
-
-
-@app.get("/js/app.js")
-def serve_js():
-    js_file = WEBUI_DIR / "js" / "app.js"
-    if js_file.exists():
-        return FileResponse(js_file)
-    return _get_index_response()
-
-
 # ---------------------------------------------------------------------------
 # Startup & Shutdown lifespan (modern FastAPI pattern, replaces deprecated @app.on_event)
 # ---------------------------------------------------------------------------
@@ -861,6 +865,7 @@ from contextlib import asynccontextmanager
 @asynccontextmanager
 async def lifespan(app_instance: FastAPI):  # type: ignore[no-untyped-def]
     """Lifespan context manager for startup and shutdown events."""
+    config = None
     try:
         config = load_config(CONFIG_PATH)
         log_level = getattr(config, "log_level", "INFO")
@@ -874,8 +879,13 @@ async def lifespan(app_instance: FastAPI):  # type: ignore[no-untyped-def]
     _setup_scheduler()
     logger.info(f"Loaded {len(_schedules)} schedules")
 
-    # Start background gallery index sync
-    threading.Thread(target=_sync_index_background, daemon=True).start()
+    # Build the discovery index synchronously so gallery reads are never empty.
+    if config is not None:
+        with _sync_lock:
+            reconcile_gallery_index(config.root_directory, exclude_patterns=config.exclude_patterns)
+
+    # Start background gallery index sync (EXIF/derived state)
+    threading.Thread(target=_run_gallery_sync, daemon=True).start()
 
     yield
     global _scheduler

@@ -7,7 +7,7 @@ AI-powered image tagging tool that scans a directory recursively, evaluates each
 - **Recursive scanning** – finds all images in a root directory tree
 - **Configurable tags with thresholds** – define what each tag means; match when AI confidence ≥ threshold
 - **Append-mode writing** – existing XPTags are preserved; only new matching tags are added
-- **Resumable runs** – checkpoint system saves progress per image; resume interrupted runs or `--force` to restart from scratch
+- **Resumable runs** – evaluation state is stored per image so interrupted runs can resume
 - **Regex exclude patterns** – skip directories/files that don't need tagging (e.g., thumbnails)
 - **Env-var overrides** – all config values can be overridden via environment variables
 - **Verbose / quiet modes** – compact summary by default; per-image details with `--verbose`
@@ -75,7 +75,6 @@ pip install ".[dev]"
 # Run the tool
 python -m exif_tagger --config config.yaml
 python -m exif_tagger --verbose        # per-image logging
-python -m exif_tagger --force          # ignore existing checkpoint, start fresh
 ```
 
 ## ⚙️ Configuration
@@ -132,7 +131,6 @@ python -m exif_tagger [OPTIONS]
 Options:
   -c, --config PATH        Path to config.yaml (default: ./config.yaml or $EXIFTAGGER_CONFIG_FILE)
   -v, --verbose            Enable per-image logging during processing
-  --force                  Ignore existing checkpoint and restart from beginning
   --list-tags              List all configured tags with descriptions & thresholds, then exit
 ```
 
@@ -144,7 +142,7 @@ Options:
 ## 📊 How tagging works
 
 1. **Scan** – recursively find all supported image files (jpg, jpeg, png, tif, tiff, webp, heic, heif), excluding paths matching configured regex patterns
-2. **Check checkpoint** – skip already-processed images; resume from where the last run stopped (unless `--force`)
+2. **Check evaluation state** – skip images whose tags already match the current tag descriptions
 3. **AI evaluation** – for each image, send it to the vision model with ALL tag definitions in one request (batch strategy B). The model returns a confidence score 0.0–1.0 for each tag
 4. **Threshold check** – if score ≥ tag's threshold → tag matches
 5. **Append write** – new matching tags are appended to existing XPTags field; duplicates are skipped; already-existing tags remain untouched

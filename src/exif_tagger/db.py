@@ -646,7 +646,7 @@ def get_gallery_folders(
     db_path: str | Path | None = None,
     root_directory: str | Path | None = None,
 ) -> dict[str, Any]:
-    """Get subdirectories under relative_path directly from disk (no image counts)."""
+    """Get subdirectories under relative_path from disk with image counts from DB."""
     from exif_tagger.config import load_config
 
     if root_directory is None:
@@ -663,14 +663,43 @@ def get_gallery_folders(
     root_path = Path(root_directory).resolve()
     target_dir = (root_path / clean_rel).resolve() if clean_rel else root_path
 
+    # Get all subfolders from disk (includes unindexed folders)
     all_subfolders: set[str] = set()
     if target_dir.exists() and target_dir.is_dir():
         for item in target_dir.iterdir():
             if item.is_dir() and not item.name.startswith("."):
                 all_subfolders.add(item.name)
 
+    # Get image counts per folder from DB
+    image_counts: dict[str, int] = {}
+    if db_path is not None:
+        init_db(db_path)
+        conn = get_connection(db_path)
+        try:
+            rows = conn.execute("SELECT relative_path FROM images").fetchall()
+            for r in rows:
+                rel_p = r["relative_path"].replace("\\", "/")
+                parts = [p for p in rel_p.split("/") if p]
+                if not clean_rel:
+                    if len(parts) > 1:
+                        child_folder = parts[0]
+                        image_counts[child_folder] = image_counts.get(child_folder, 0) + 1
+                else:
+                    rel_parts = [p for p in clean_rel.split("/") if p]
+                    depth = len(rel_parts)
+                    if len(parts) > depth + 1 and [p.lower() for p in parts[:depth]] == rel_parts:
+                        child_folder = parts[depth]
+                        image_counts[child_folder] = image_counts.get(child_folder, 0) + 1
+        finally:
+            conn.close()
+
     folders_list = [
-        {"name": name, "relative_path": f"{clean_rel}/{name}" if clean_rel else name} for name in sorted(all_subfolders)
+        {
+            "name": name,
+            "relative_path": f"{clean_rel}/{name}" if clean_rel else name,
+            "image_count": image_counts.get(name, 0),
+        }
+        for name in sorted(all_subfolders)
     ]
 
     breadcrumbs = [{"name": "Root", "path": ""}]

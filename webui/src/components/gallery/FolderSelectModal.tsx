@@ -1,5 +1,5 @@
 import React from 'react';
-import { Folder, FolderOpen, ChevronRight, Check } from 'lucide-react';
+import { Folder, FolderOpen, ChevronRight, Check, Loader2 } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -19,6 +19,7 @@ interface FolderSelectModalProps {
   breadcrumbs: FolderBreadcrumb[];
   onNavigate: (path: string) => void;
   onSelectFolder: (path: string) => void;
+  isFoldersLoading?: boolean;
   title?: string;
   description?: string;
 }
@@ -31,6 +32,7 @@ export const FolderSelectModal: React.FC<FolderSelectModalProps> = ({
   breadcrumbs,
   onNavigate,
   onSelectFolder,
+  isFoldersLoading = false,
   title = 'Select Image Directory',
   description = 'Navigate directories to filter your gallery photos.',
 }) => {
@@ -77,7 +79,12 @@ export const FolderSelectModal: React.FC<FolderSelectModalProps> = ({
 
         {/* Directory Grid */}
         <div className="min-h-[220px] max-h-[350px] overflow-y-auto p-1">
-          {folders && folders.length > 0 ? (
+          {isFoldersLoading ? (
+            <div className="flex flex-col items-center justify-center py-12 text-center">
+              <Loader2 className="w-10 h-10 text-primary animate-spin mb-3" />
+              <p className="text-sm font-medium text-muted-foreground">Scanning directory...</p>
+            </div>
+          ) : folders && folders.length > 0 ? (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
               {folders.map((f) => (
                 <div

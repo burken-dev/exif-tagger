@@ -29,6 +29,7 @@ export function useProcessing() {
   const [folders, setFolders] = useState<FolderItem[]>([]);
   const [modalFolder, setModalFolder] = useState<string>('');
   const [folderBreadcrumbs, setFolderBreadcrumbs] = useState<FolderBreadcrumb[]>([]);
+  const [foldersLoading, setFoldersLoading] = useState<boolean>(false);
 
   const lastProcessedLogIdRef = useRef<number>(0);
   const pollTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -225,6 +226,7 @@ export function useProcessing() {
 
   const fetchFolders = useCallback(async (path = '') => {
     setModalFolder(path);
+    setFoldersLoading(true);
     try {
       const resp = await fetch(`/api/gallery/folders?path=${encodeURIComponent(path)}`);
       if (!resp.ok) throw new Error('Failed to fetch folders');
@@ -235,6 +237,8 @@ export function useProcessing() {
       console.error('Failed to load folders:', err);
       setFolders([]);
       setFolderBreadcrumbs([]);
+    } finally {
+      setFoldersLoading(false);
     }
   }, []);
 
@@ -253,6 +257,7 @@ export function useProcessing() {
     folders,
     modalFolder,
     folderBreadcrumbs,
+    foldersLoading,
     startProcessing,
     stopProcessing,
     clearLogs,

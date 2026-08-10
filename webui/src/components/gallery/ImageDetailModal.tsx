@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Image as ImageIcon, Tag as TagIcon, X, Plus, Save, FileText, RefreshCw } from 'lucide-react';
+import { Image as ImageIcon, Tag as TagIcon, X, Plus, Save, FileText, RefreshCw, Loader2 } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -20,6 +20,7 @@ interface ImageDetailModalProps {
   onUpdateTags: (imageId: number | null, tags: string[]) => Promise<{ success: boolean; error?: string }>;
   onSyncSingleImage?: (relativePath: string) => Promise<{ success: boolean; image?: GalleryImage; error?: string }>;
   allTags: string[];
+  isImageDetailLoading?: boolean;
 }
 
 export const ImageDetailModal: React.FC<ImageDetailModalProps> = ({
@@ -29,6 +30,7 @@ export const ImageDetailModal: React.FC<ImageDetailModalProps> = ({
   onUpdateTags,
   onSyncSingleImage,
   allTags,
+  isImageDetailLoading = false,
 }) => {
   const [tags, setTags] = useState<string[]>([]);
   const [newTagInput, setNewTagInput] = useState('');
@@ -42,6 +44,26 @@ export const ImageDetailModal: React.FC<ImageDetailModalProps> = ({
       setNewTagInput('');
     }
   }, [image]);
+
+  if (!image && !isImageDetailLoading) return null;
+
+  if (isImageDetailLoading && !image) {
+    return (
+      <Dialog open={open} onOpenChange={(val) => !val && onClose()}>
+        <DialogContent className="max-w-4xl w-[95vw] max-h-[90vh] flex flex-col p-0 overflow-hidden bg-background">
+          <DialogHeader className="p-4 border-b border-border bg-card/50">
+            <DialogTitle className="flex items-center gap-2 text-base font-semibold">
+              <ImageIcon className="w-4 h-4 text-primary shrink-0" />
+              Loading Image Details...
+            </DialogTitle>
+          </DialogHeader>
+          <div className="flex-1 flex items-center justify-center p-8">
+            <Loader2 className="w-8 h-8 text-primary animate-spin" />
+          </div>
+        </DialogContent>
+      </Dialog>
+    );
+  }
 
   if (!image) return null;
 

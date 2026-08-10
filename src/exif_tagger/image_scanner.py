@@ -92,10 +92,6 @@ def scan_images(
             if not excluded:
                 image_paths.append(file_path)
 
-        else:
-            continue
-        break
-
     # Sort for deterministic order
     image_paths.sort()
 

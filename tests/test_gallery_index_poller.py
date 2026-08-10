@@ -179,3 +179,24 @@ def test_reconcile_symlink_dir_alias_no_duplicate(tmp_path):
     rows = conn.execute("SELECT file_path FROM images").fetchall()
     conn.close()
     assert len({r["file_path"] for r in rows}) == 1  # alias and real do not double-index
+
+
+def test_reconcile_file_replaced_by_dir_removes_ghost(tmp_path):
+    from exif_tagger.db import get_connection, reconcile_gallery_index
+
+    db = tmp_path / "g.db"
+    root = tmp_path / "gallery"
+    root.mkdir()
+    make_img(root / "item.jpg")
+    reconcile_gallery_index(root, db_path=db)
+    assert reconcile_gallery_index(root, db_path=db)["total"] == 1
+
+    (root / "item.jpg").unlink()
+    (root / "item.jpg").mkdir()  # same name is now a directory
+    make_img(root / "item.jpg" / "a.jpg")
+    reconcile_gallery_index(root, db_path=db)
+
+    conn = get_connection(db)
+    paths = {r["relative_path"] for r in conn.execute("SELECT relative_path FROM images").fetchall()}
+    conn.close()
+    assert paths == {"item.jpg/a.jpg"}

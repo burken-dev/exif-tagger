@@ -396,7 +396,11 @@ def reconcile_gallery_index(
                         continue
 
                 for seg, r in list(old_by_seg.items()):
-                    if seg in present_files or seg in present_dirs:
+                    if seg in present_files:
+                        continue
+                    if seg in present_dirs:
+                        conn.execute("DELETE FROM images WHERE id = ?", (r["id"],))
+                        stats["removed"] += 1
                         continue
                     cand_name = mtime_to_name.get(r["last_modified"]) if r["last_modified"] is not None else None
                     if cand_name is not None and cand_name in present_files and cand_name not in old_by_seg:
@@ -465,7 +469,10 @@ def reconcile_gallery_index(
                         )
                         stats["updated"] += 1
 
-            post = os.stat(d_abs).st_mtime
+            try:
+                post = os.stat(d_abs).st_mtime
+            except OSError:
+                continue  # dir vanished mid-scan; stale baseline -> next poll rescans
             if abs(pre - post) <= _MTIME_EPS:
                 with conn:
                     conn.execute(

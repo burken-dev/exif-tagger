@@ -343,3 +343,133 @@ def test_sync_gallery_index_with_relative_db_paths(tmp_path):
     assert len(rows) == 1
     assert rows[0]["id"] == original_id, f"Expected id {original_id}, got {rows[0]['id']}"
     assert stats["deleted"] == 0
+
+
+def test_sync_extracts_exif_when_exif_mtime_null(tmp_path):
+    """A row inserted by the poller (exif_mtime NULL) still gets EXIF tags."""
+    import os
+
+    from exif_tagger.db import get_connection, init_db, reconcile_gallery_index, sync_gallery_index
+
+    db_path = tmp_path / "test.db"
+    init_db(db_path)
+    gallery_dir = tmp_path / "gallery"
+    gallery_dir.mkdir()
+    img = gallery_dir / "photo.jpg"
+    img_ = PILImage.new("RGB", (50, 50), color="blue")
+    img_.save(img)
+    set_xptags(img, ["nature"])
+
+    # Discovery-only pass: inserts the row, must NOT read EXIF.
+    reconcile_gallery_index(gallery_dir, db_path=db_path)
+    conn = get_connection(db_path)
+    try:
+        row = conn.execute("SELECT id, exif_mtime FROM images").fetchone()
+        assert row["exif_mtime"] is None
+        img_id = row["id"]
+    finally:
+        conn.close()
+
+    sync_gallery_index(gallery_dir, db_path=db_path)
+
+    conn = get_connection(db_path)
+    try:
+        tags = [r["tag_name"] for r in conn.execute(
+            "SELECT tag_name FROM image_tags WHERE image_id = ?", (img_id,))]
+        mtime = conn.execute("SELECT exif_mtime FROM images WHERE id = ?", (img_id,)).fetchone()["exif_mtime"]
+    finally:
+        conn.close()
+
+    assert tags == ["nature"]
+    assert abs(mtime - os.stat(img).st_mtime) < 0.001
+
+
+def test_sync_second_run_is_skip_no_re_extract(tmp_path):
+    """A second sync with unchanged mtime must not re-read EXIF or rewrite tags."""
+    from exif_tagger.db import get_connection, init_db, sync_gallery_index
+
+    db_path = tmp_path / "test.db"
+    init_db(db_path)
+    gallery_dir = tmp_path / "gallery"
+    gallery_dir.mkdir()
+    img = gallery_dir / "photo.jpg"
+    PILImage.new("RGB", (50, 50), color="blue").save(img)
+    set_xptags(img, ["nature"])
+
+    stats1 = sync_gallery_index(gallery_dir, db_path=db_path)
+    # Simulate a manual tag the user added in the UI only (not in EXIF).
+    conn = get_connection(db_path)
+    img_id = conn.execute("SELECT id FROM images").fetchone()["id"]
+    conn.execute(
+        "INSERT INTO image_tags (image_id, tag_name, source) VALUES (?, 'useronly', 'manual_ui')",
+        (img_id,),
+    )
+    conn.commit()
+    conn.close()
+
+    stats2 = sync_gallery_index(gallery_dir, db_path=db_path)
+    assert stats2["updated"] == 0
+
+    conn = get_connection(db_path)
+    tags = {r["tag_name"] for r in conn.execute(
+        "SELECT tag_name FROM image_tags WHERE image_id = ?", (img_id,))}
+    conn.close()
+    assert tags == {"nature", "useronly"}  # nothing re-read, nothing wiped
+
+
+def test_sync_re_extracts_after_file_modification(tmp_path):
+    """Changing the file mtime triggers EXIF re-extraction."""
+    import os
+
+    from exif_tagger.db import get_connection, init_db, sync_gallery_index
+
+    db_path = tmp_path / "test.db"
+    init_db(db_path)
+    gallery_dir = tmp_path / "gallery"
+    gallery_dir.mkdir()
+    img = gallery_dir / "photo.jpg"
+    PILImage.new("RGB", (50, 50), color="blue").save(img)
+    set_xptags(img, ["nature"])
+
+    sync_gallery_index(gallery_dir, db_path=db_path)
+
+    set_xptags(img, ["architecture"])
+    new_mtime = img.stat().st_mtime + 5.0
+    os.utime(img, (new_mtime, new_mtime))
+
+    stats = sync_gallery_index(gallery_dir, db_path=db_path)
+    assert stats["updated"] == 1
+
+    conn = get_connection(db_path)
+    tags = {r["tag_name"] for r in conn.execute("SELECT tag_name FROM image_tags").fetchall()}
+    conn.close()
+    assert tags == {"architecture"}
+
+
+def test_update_image_in_db_from_file_gates_on_exif_mtime(tmp_path):
+    """update_image_in_db_from_file skips EXIF rewrite when exif_mtime matches."""
+    from exif_tagger.db import get_connection, init_db, update_image_in_db_from_file
+
+    db_path = tmp_path / "test.db"
+    init_db(db_path)
+    img = tmp_path / "single.jpg"
+    PILImage.new("RGB", (50, 50), color="yellow").save(img)
+    set_xptags(img, ["tag1"])
+
+    update_image_in_db_from_file(img, root_directory=tmp_path, db_path=db_path)
+    conn = get_connection(db_path)
+    img_id = conn.execute("SELECT id FROM images").fetchone()["id"]
+    conn.execute(
+        "INSERT INTO image_tags (image_id, tag_name, source) VALUES (?, 'useronly', 'manual_ui')",
+        (img_id,),
+    )
+    conn.commit()
+    conn.close()
+
+    update_image_in_db_from_file(img, root_directory=tmp_path, db_path=db_path)
+
+    conn = get_connection(db_path)
+    tags = {r["tag_name"] for r in conn.execute(
+        "SELECT tag_name FROM image_tags WHERE image_id = ?", (img_id,))}
+    conn.close()
+    assert tags == {"tag1", "useronly"}

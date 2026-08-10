@@ -186,7 +186,7 @@ def sync_gallery_index(
     try:
         with conn:
             # 1. Purge records for files that no longer exist or are no longer in scanned set
-            existing_rows = conn.execute("SELECT id, file_path, relative_path, last_modified FROM images").fetchall()
+            existing_rows = conn.execute("SELECT id, file_path, relative_path, last_modified, exif_mtime FROM images").fetchall()
             existing_db_map = {}
             for row in existing_rows:
                 raw_fp = row["file_path"]
@@ -215,7 +215,11 @@ def sync_gallery_index(
                     continue
 
                 db_entry = existing_db_map.get(abs_path_str)
-                needs_update = db_entry is None or abs(db_entry["last_modified"] - mtime) > 0.001
+                needs_update = (
+                    db_entry is None
+                    or db_entry["exif_mtime"] is None
+                    or abs(db_entry["exif_mtime"] - mtime) > 0.001
+                )
 
                 if needs_update:
                     try:
@@ -229,10 +233,10 @@ def sync_gallery_index(
                     if db_entry is None:
                         cursor = conn.execute(
                             """
-                            INSERT INTO images (file_path, filename, relative_path, last_modified, indexed_at)
-                            VALUES (?, ?, ?, ?, ?)
+                            INSERT INTO images (file_path, filename, relative_path, last_modified, exif_mtime, indexed_at)
+                            VALUES (?, ?, ?, ?, ?, ?)
                             """,
-                            (abs_path_str, img_path.name, rel_path, mtime, now_iso),
+                            (abs_path_str, img_path.name, rel_path, mtime, mtime, now_iso),
                         )
                         image_id = cursor.lastrowid
                     else:
@@ -241,10 +245,10 @@ def sync_gallery_index(
                         conn.execute(
                             """
                             UPDATE images
-                            SET file_path = ?, filename = ?, relative_path = ?, last_modified = ?, indexed_at = ?
+                            SET file_path = ?, filename = ?, relative_path = ?, last_modified = ?, exif_mtime = ?, indexed_at = ?
                             WHERE id = ?
                             """,
-                            (abs_path_str, img_path.name, rel_path, mtime, now_iso, image_id),
+                            (abs_path_str, img_path.name, rel_path, mtime, mtime, now_iso, image_id),
                         )
 
                         old_tags = conn.execute(
@@ -1070,7 +1074,6 @@ def update_image_in_db_from_file(
     else:
         rel_path = path.name
 
-    exif_tags = get_existing_xptags(path)
     from datetime import UTC, datetime
 
     now_iso = datetime.now(UTC).isoformat()
@@ -1078,18 +1081,22 @@ def update_image_in_db_from_file(
     conn = get_connection(db_path)
     try:
         with conn:
-            row = conn.execute("SELECT id FROM images WHERE file_path = ?", (abs_path_str,)).fetchone()
+            row = conn.execute(
+                "SELECT id, exif_mtime FROM images WHERE file_path = ?", (abs_path_str,)
+            ).fetchone()
             if row is None:
                 cursor = conn.execute(
                     """
-                    INSERT INTO images (file_path, filename, relative_path, last_modified, indexed_at)
-                    VALUES (?, ?, ?, ?, ?)
+                    INSERT INTO images (file_path, filename, relative_path, last_modified, exif_mtime, indexed_at)
+                    VALUES (?, ?, ?, ?, NULL, ?)
                     """,
                     (abs_path_str, path.name, rel_path, mtime, now_iso),
                 )
                 image_id = cursor.lastrowid
+                exif_mtime = None
             else:
                 image_id = row["id"]
+                exif_mtime = row["exif_mtime"]
                 conn.execute(
                     """
                     UPDATE images
@@ -1098,15 +1105,20 @@ def update_image_in_db_from_file(
                     """,
                     (path.name, rel_path, mtime, now_iso, image_id),
                 )
-                conn.execute("DELETE FROM image_tags WHERE image_id = ?", (image_id,))
 
-            for t in exif_tags:
-                clean_tag = t.strip().lower()
-                if clean_tag:
-                    conn.execute(
-                        "INSERT OR IGNORE INTO image_tags (image_id, tag_name) VALUES (?, ?)",
-                        (image_id, clean_tag),
-                    )
+            if exif_mtime is None or abs(exif_mtime - mtime) > _MTIME_EPS:
+                # ponytail: preserves the pre-existing behavior of replacing image_tags with EXIF
+                # (wipes model tags); only reached when the file actually changed on disk.
+                exif_tags = get_existing_xptags(path)  # lazy: skipped when EXIF is up to date
+                conn.execute("DELETE FROM image_tags WHERE image_id = ?", (image_id,))
+                for t in exif_tags:
+                    clean_tag = t.strip().lower()
+                    if clean_tag:
+                        conn.execute(
+                            "INSERT OR IGNORE INTO image_tags (image_id, tag_name) VALUES (?, ?)",
+                            (image_id, clean_tag),
+                        )
+                conn.execute("UPDATE images SET exif_mtime = ? WHERE id = ?", (mtime, image_id))
         _invalidate_gallery_view_cache()
     finally:
         conn.close()

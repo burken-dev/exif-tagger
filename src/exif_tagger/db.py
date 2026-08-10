@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 import os
 import sqlite3
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -264,6 +265,7 @@ def get_gallery_images(
     search: str | None = None,
     folder: str | None = None,
     root_directory: str | Path | None = None,
+    is_cancelled: Callable[[], bool] | None = None,
 ) -> tuple[list[dict[str, Any]], int]:
     """Retrieve paginated images matching optional tag filter, folder scope, or search/glob string.
 
@@ -335,7 +337,7 @@ def get_gallery_images(
         # ------------------------------------------------------------------ #
         # Scan filesystem                                                      #
         # ------------------------------------------------------------------ #
-        scanned_paths = scan_images(target_path, exclude_patterns=exclude_patterns)
+        scanned_paths = scan_images(target_path, exclude_patterns=exclude_patterns, is_cancelled=is_cancelled)
 
         has_glob = search and any(char in search for char in ("*", "?", "["))
         search_pattern = search.strip().lower() if search else None
@@ -358,6 +360,9 @@ def get_gallery_images(
                 else:
                     if search_pattern not in fname.lower() and search_pattern not in rel_p.lower():
                         continue
+
+            if is_cancelled and is_cancelled():
+                return [], 0
 
             fs_items.append((img_path, rel_p, fname))
 
@@ -387,6 +392,9 @@ def get_gallery_images(
         if found_ids:
             chunk_size = 900
             for i in range(0, len(found_ids), chunk_size):
+                if is_cancelled and is_cancelled():
+                    return [], 0
+
                 chunk = found_ids[i : i + chunk_size]
                 id_placeholders = ",".join("?" for _ in chunk)
                 tag_rows = conn.execute(

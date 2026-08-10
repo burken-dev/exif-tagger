@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import re
+from collections.abc import Callable
 from pathlib import Path
 
 from exif_tagger.models.schema import IMAGE_EXTENSIONS, ImageCheckpoint
@@ -31,12 +32,14 @@ def _is_image_path(path: Path) -> bool:
 def scan_images(
     root_directory: str | Path,
     exclude_patterns: list[str] | None = None,
+    is_cancelled: Callable[[], bool] | None = None,
 ) -> list[Path]:
     """Recursively find all images in the given directory.
 
     Args:
         root_directory: The base directory to search recursively.
         exclude_patterns: Optional list of regex patterns for paths to skip.
+        is_cancelled: Optional callback returning True when scanning should stop early.
 
     Returns:
         Sorted list of absolute Path objects pointing to image files.
@@ -54,6 +57,10 @@ def scan_images(
     image_paths: list[Path] = []
 
     for dirpath, _dirnames, filenames in sorted(root.walk()):
+        if is_cancelled and is_cancelled():
+            logger.info("Scan cancelled after finding %d images", len(image_paths))
+            break
+
         current_dir = Path(dirpath)
 
         # Check if the *directory* itself should be excluded (match on relative path from root)
@@ -64,6 +71,10 @@ def scan_images(
             rel_path = ""
 
         for filename in sorted(filenames):
+            if is_cancelled and is_cancelled():
+                logger.info("Scan cancelled after finding %d images", len(image_paths))
+                break
+
             file_path = current_dir / filename
             if not _is_image_path(file_path):
                 continue
@@ -80,6 +91,10 @@ def scan_images(
 
             if not excluded:
                 image_paths.append(file_path)
+
+        else:
+            continue
+        break
 
     # Sort for deterministic order
     image_paths.sort()

@@ -55,6 +55,22 @@ class TestScanImages:
         with pytest.raises(FileNotFoundError):
             scan_images("/nonexistent/directory/path/xyz")
 
+    def test_scan_cancelled_stops_early(self, tmp_path):
+        """scan_images should stop when is_cancelled returns True."""
+        # Create 10 images sorted alphabetically (a.jpg through j.jpg)
+        for letter in "abcdefghij":
+            Image.new("RGB", (50, 50)).save(tmp_path / f"{letter}.jpg")
+
+        call_count = 0
+
+        def is_cancelled():
+            nonlocal call_count
+            call_count += 1
+            return call_count >= 3  # Cancel on the 3rd check
+
+        images = scan_images(tmp_path, is_cancelled=is_cancelled)
+        assert len(images) < 10, "scan_images should have stopped early"
+
 
 class TestExcludeCompilers:
     """Test regex compiler builder for exclude patterns."""

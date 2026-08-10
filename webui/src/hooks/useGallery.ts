@@ -31,6 +31,7 @@ export function useGallery() {
   const pageSizeRef = useRef<number>(pageSize);
   const isPollingRef = useRef<boolean>(false);
   const isSyncingHashRef = useRef<boolean>(false);
+  const galleryAbortController = useRef<AbortController | null>(null);
 
   useEffect(() => {
     currentFolderRef.current = currentFolder;
@@ -120,6 +121,13 @@ export function useGallery() {
     };
   }, [parseUrlHash]);
 
+  // Cleanup abort controller on unmount
+  useEffect(() => {
+    return () => {
+      galleryAbortController.current?.abort();
+    };
+  }, []);
+
   // Update URL Hash whenever relevant state changes
   useEffect(() => {
     updateUrlHash();
@@ -139,6 +147,10 @@ export function useGallery() {
 
   // Fetch Images
   const fetchGalleryImages = useCallback(async () => {
+    galleryAbortController.current?.abort();
+    const controller = new AbortController();
+    galleryAbortController.current = controller;
+
     setLoading(true);
     setError(null);
     try {
@@ -157,13 +169,14 @@ export function useGallery() {
       if (trimmedSearch) url += `&search=${encodeURIComponent(trimmedSearch)}`;
       if (folder) url += `&folder=${encodeURIComponent(folder)}`;
 
-      const resp = await fetch(url);
+      const resp = await fetch(url, { signal: controller.signal });
       if (!resp.ok) throw new Error('Failed to fetch gallery images');
       const data = await resp.json();
 
       setImages(data.images || []);
       setTotalImages(data.total || 0);
     } catch (err: any) {
+      if (err.name === 'AbortError') return;
       setError(err.message || 'Error loading images');
       setImages([]);
       setTotalImages(0);

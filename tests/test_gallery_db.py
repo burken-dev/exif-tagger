@@ -187,39 +187,29 @@ def test_get_db_path_db_file_override(monkeypatch, tmp_path):
 
 
 def test_get_gallery_images_filesystem_unindexed(tmp_path):
-    from exif_tagger.db import get_gallery_images, init_db, sync_single_image
+    """Every file on disk is discovered (with an id) once the index is reconciled."""
+    from exif_tagger.db import get_gallery_images, init_db, reconcile_gallery_index
 
     db_path = tmp_path / "test.db"
     init_db(db_path)
 
-    # Create dummy images on disk
     img1 = tmp_path / "a.jpg"
     img2 = tmp_path / "sub" / "b.png"
     img2.parent.mkdir(parents=True, exist_ok=True)
     img1.write_bytes(b"dummy")
     img2.write_bytes(b"dummy")
 
-    # Call get_gallery_images without tags (should list both from disk even though DB is empty)
+    reconcile_gallery_index(tmp_path, db_path=db_path)
     images, total = get_gallery_images(db_path=db_path, root_directory=tmp_path)
     assert total == 2
+    assert all(img["id"] is not None for img in images)
+    assert all(img["indexed"] is True for img in images)
     assert images[0]["filename"] == "a.jpg"
-    assert images[0]["indexed"] is False
-    assert images[0]["id"] is None
     assert images[1]["relative_path"] == "sub/b.png"
-
-    # Test sync_single_image
-    synced = sync_single_image("a.jpg", db_path=db_path, root_directory=tmp_path)
-    assert synced["indexed"] is True
-    assert synced["id"] is not None
-
-    # Query again: a.jpg should now be indexed, sub/b.png unindexed
-    images, total = get_gallery_images(db_path=db_path, root_directory=tmp_path)
-    assert images[0]["indexed"] is True
-    assert images[1]["indexed"] is False
 
 
 def test_get_gallery_images_untagged_folder_and_search(tmp_path):
-    from exif_tagger.db import get_gallery_images, init_db
+    from exif_tagger.db import get_gallery_images, init_db, reconcile_gallery_index
 
     db_path = tmp_path / "test.db"
     init_db(db_path)
@@ -234,18 +224,16 @@ def test_get_gallery_images_untagged_folder_and_search(tmp_path):
     sub2.mkdir()
     (sub2 / "other.jpg").write_bytes(b"dummy")
 
-    # Folder filter test
+    reconcile_gallery_index(tmp_path, db_path=db_path)
+
     images, total = get_gallery_images(db_path=db_path, folder="folder1", root_directory=tmp_path)
     assert total == 2
-    filenames = [img["filename"] for img in images]
-    assert filenames == ["img1.jpg", "photo2.png"]
+    assert [img["filename"] for img in images] == ["img1.jpg", "photo2.png"]
 
-    # Search filter test (glob)
     images_glob, total_glob = get_gallery_images(db_path=db_path, search="*.png", root_directory=tmp_path)
     assert total_glob == 1
     assert images_glob[0]["filename"] == "photo2.png"
 
-    # Search filter test (substring)
     images_sub, total_sub = get_gallery_images(db_path=db_path, search="img1", root_directory=tmp_path)
     assert total_sub == 1
     assert images_sub[0]["filename"] == "img1.jpg"
@@ -500,3 +488,92 @@ def test_update_image_tags_sets_exif_mtime(tmp_path):
     conn.close()
     assert abs(row["exif_mtime"] - row["last_modified"]) < 0.001
     assert abs(row["last_modified"] - os.stat(img).st_mtime) < 0.001
+
+
+def test_get_gallery_images_is_db_only(monkeypatch, tmp_path):
+    """Reads must never touch the filesystem."""
+    from exif_tagger.db import get_gallery_images, init_db, reconcile_gallery_index
+
+    db_path = tmp_path / "test.db"
+    init_db(db_path)
+    root = tmp_path / "gallery"
+    root.mkdir()
+    (root / "a.jpg").write_bytes(b"x")
+    reconcile_gallery_index(root, db_path=db_path)
+
+    def boom(*args, **kwargs):
+        raise AssertionError("filesystem must not be scanned during reads")
+
+    monkeypatch.setattr("exif_tagger.db.scan_images", boom)
+    images, total = get_gallery_images(db_path=db_path)
+    assert total == 1
+
+
+def test_get_gallery_images_folder_special_chars(tmp_path):
+    from exif_tagger.db import get_gallery_images, init_db, reconcile_gallery_index
+
+    db_path = tmp_path / "test.db"
+    init_db(db_path)
+    root = tmp_path / "gallery"
+    root.mkdir()
+    special = root / "50%_photos"
+    special.mkdir()
+    (special / "one.jpg").write_bytes(b"x")
+    reconcile_gallery_index(root, db_path=db_path)
+
+    images, total = get_gallery_images(db_path=db_path, folder="50%_photos")
+    assert total == 1
+    assert images[0]["filename"] == "one.jpg"
+
+
+def test_get_gallery_images_tag_and_semantics(tmp_path):
+    """Selecting multiple tags requires ALL of them (AND), not any."""
+    from exif_tagger.db import get_gallery_images, init_db, sync_gallery_index
+
+    db_path = tmp_path / "test.db"
+    init_db(db_path)
+    root = tmp_path / "gallery"
+    root.mkdir()
+    for name, tags in [("a.jpg", ["x", "y"]), ("b.jpg", ["x"]), ("c.jpg", ["y"])]:
+        p = root / name
+        PILImage.new("RGB", (20, 20)).save(p)
+        set_xptags(p, tags)
+    sync_gallery_index(root, db_path=db_path)
+
+    images, total = get_gallery_images(db_path=db_path, tags=["x", "y"])
+    assert total == 1
+    assert images[0]["filename"] == "a.jpg"
+
+
+def test_get_gallery_images_search_unicode_case(tmp_path):
+    from exif_tagger.db import get_gallery_images, init_db, reconcile_gallery_index
+
+    db_path = tmp_path / "test.db"
+    init_db(db_path)
+    root = tmp_path / "gallery"
+    root.mkdir()
+    (root / "Ångström.jpg").write_bytes(b"x")
+    reconcile_gallery_index(root, db_path=db_path)
+
+    images, total = get_gallery_images(db_path=db_path, search="ångström")
+    assert total == 1
+    images2, total2 = get_gallery_images(db_path=db_path, search="ÅNGSTRÖM")
+    assert total2 == 1
+
+
+def test_get_gallery_images_pagination(tmp_path):
+    from exif_tagger.db import get_gallery_images, init_db, reconcile_gallery_index
+
+    db_path = tmp_path / "test.db"
+    init_db(db_path)
+    root = tmp_path / "gallery"
+    root.mkdir()
+    for i in range(5):
+        (root / f"img{i}.jpg").write_bytes(b"x")
+    reconcile_gallery_index(root, db_path=db_path)
+
+    page1, total = get_gallery_images(db_path=db_path, offset=0, limit=2)
+    page2, _ = get_gallery_images(db_path=db_path, offset=2, limit=2)
+    assert total == 5
+    assert len(page1) == 2 and len(page2) == 2
+    assert {img["id"] for img in page1}.isdisjoint({img["id"] for img in page2})

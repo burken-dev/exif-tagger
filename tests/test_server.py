@@ -428,7 +428,7 @@ class TestGalleryTask2Endpoints:
     def test_gallery_sync_filtered_mode(self, client, tmp_path):
         import time
 
-        from exif_tagger.db import init_db
+        from exif_tagger.db import init_db, reconcile_gallery_index
         from exif_tagger.models.schema import Config as SchemaConfig
         from exif_tagger.models.schema import ModelConfig
 
@@ -440,6 +440,8 @@ class TestGalleryTask2Endpoints:
         sub_dir.mkdir()
         (tmp_path / "root_img.jpg").write_bytes(b"\xff\xd8\xff\xe0\x00\x10JFIF\x00")
         (sub_dir / "sub_img.jpg").write_bytes(b"\xff\xd8\xff\xe0\x00\x10JFIF\x00")
+
+        reconcile_gallery_index(tmp_path, db_path=db_file)
 
         dummy_config = SchemaConfig(
             root_directory=str(tmp_path),

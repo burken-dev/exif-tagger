@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from exif_tagger.exif_writer import get_existing_xptags, set_xptags
-from exif_tagger.image_scanner import scan_images
+from exif_tagger.image_scanner import _is_image_path, build_exclude_compilers, scan_images
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +30,7 @@ DEFAULT_DB_PATH = _config_dir / "gallery.db"
 _gallery_view_cache: dict[tuple[Any, ...], tuple[float, tuple]] = {}
 _gallery_view_cache_lock = threading.Lock()
 _GALLERY_VIEW_CACHE_TTL = 3.0
+_MTIME_EPS = 0.001
 
 
 def _invalidate_gallery_view_cache() -> None:
@@ -281,6 +282,207 @@ def sync_gallery_index(
             "updated": updated_count,
             "deleted": deleted_count,
         }
+    finally:
+        conn.close()
+
+
+def reconcile_gallery_index(
+    root_directory: str | Path,
+    db_path: str | Path | None = None,
+    exclude_patterns: list[str] | None = None,
+    full: bool = False,
+) -> dict[str, int]:
+    """Mirror the filesystem image listing into the `images` table.
+
+    Walks root_directory top-down. Every directory is walked (so deep additions and
+    deletions are never missed), but only directories whose mtime differs from the
+    stored baseline are reconciled against the DB. Only file paths and mtimes are
+    written; EXIF/tag/vision state is never touched (see exif_mtime). full=True
+    disables the mtime pruning and reconciles every directory (fallback path).
+
+    Returns {"total": int, "added": int, "removed": int, "updated": int}.
+    """
+    from datetime import UTC, datetime
+
+    init_db(db_path)
+    root = Path(root_directory).resolve()
+    conn = get_connection(db_path)
+    compilers = build_exclude_compilers(exclude_patterns or [])
+    stats = {"total": 0, "added": 0, "removed": 0, "updated": 0}
+    now_iso = datetime.now(UTC).isoformat()
+
+    def is_excluded(rel: str) -> bool:
+        return any(c.search(rel) for c in compilers)
+
+    def purge_subtree(d_rel: str, d_abs: str) -> None:
+        conn.execute(
+            "DELETE FROM images WHERE relative_path = ? OR relative_path LIKE ? || '/%'",
+            (d_rel, d_rel),
+        )
+        conn.execute(
+            "DELETE FROM dir_mtimes WHERE dir_path = ? OR dir_path LIKE ? || '/%'",
+            (d_abs, d_abs),
+        )
+
+    try:
+        stack: list[str] = [str(root)]
+        while stack:
+            d_abs = stack.pop()
+            d_path = Path(d_abs)
+            try:
+                d_mtime = os.stat(d_abs).st_mtime
+            except OSError:
+                continue
+            try:
+                d_rel = "" if d_path == root else d_path.relative_to(root).as_posix()
+            except ValueError:
+                d_rel = d_path.name
+
+            if is_excluded(d_rel):
+                with conn:
+                    purge_subtree(d_rel, d_abs)
+                continue
+
+            try:
+                with os.scandir(d_abs) as it:
+                    entries = list(it)
+            except OSError:
+                continue
+
+            for e in entries:
+                try:
+                    if e.is_dir():
+                        stack.append(e.path)
+                except OSError:
+                    continue
+
+            if not full:
+                baseline = conn.execute(
+                    "SELECT mtime FROM dir_mtimes WHERE dir_path = ?", (d_abs,)
+                ).fetchone()
+                if baseline is not None and abs(baseline["mtime"] - d_mtime) <= _MTIME_EPS:
+                    continue  # walked but unchanged -> no DB work
+
+            pre = d_mtime
+            with conn:
+                prefix = f"{d_rel}/" if d_rel else ""
+                if d_rel:
+                    children = conn.execute(
+                        "SELECT id, file_path, filename, relative_path, last_modified FROM images "
+                        "WHERE relative_path LIKE ? AND relative_path NOT LIKE ?",
+                        (prefix + "%", prefix + "%/%"),
+                    ).fetchall()
+                else:
+                    children = conn.execute(
+                        "SELECT id, file_path, filename, relative_path, last_modified FROM images "
+                        "WHERE relative_path NOT LIKE '%/%'",
+                    ).fetchall()
+
+                old_by_seg = {r["relative_path"][len(prefix):] if prefix else r["relative_path"]: r for r in children}
+
+                present_files: dict[str, os.DirEntry[str]] = {}
+                present_dirs: set[str] = set()
+                for e in entries:
+                    try:
+                        if e.is_dir():
+                            present_dirs.add(e.name)
+                            continue
+                    except OSError:
+                        pass
+                    if _is_image_path(Path(e.name)):
+                        rel = f"{prefix}{e.name}" if prefix else e.name
+                        if not is_excluded(rel):
+                            present_files[e.name] = e
+
+                # Rename detection: a stale row whose last_modified matches a NEW file's mtime.
+                mtime_to_name: dict[float, str] = {}
+                for name, e in present_files.items():
+                    try:
+                        mtime_to_name.setdefault(e.stat().st_mtime, name)
+                    except OSError:
+                        continue
+
+                for seg, r in list(old_by_seg.items()):
+                    if seg in present_files or seg in present_dirs:
+                        continue
+                    cand_name = mtime_to_name.get(r["last_modified"]) if r["last_modified"] is not None else None
+                    if cand_name is not None and cand_name in present_files and cand_name not in old_by_seg:
+                        cand_e = present_files.pop(cand_name)
+                        try:
+                            cand_mtime = cand_e.stat().st_mtime
+                        except OSError:
+                            cand_mtime = r["last_modified"]
+                        conn.execute(
+                            "UPDATE images SET file_path = ?, filename = ?, relative_path = ?, last_modified = ? WHERE id = ?",
+                            (str((d_path / cand_name).resolve()), cand_name, f"{prefix}{cand_name}", cand_mtime, r["id"]),
+                        )
+                        stats["updated"] += 1
+                        continue
+                    seg_rel = f"{prefix}{seg}"
+                    cur = conn.execute(
+                        "DELETE FROM images WHERE relative_path = ? OR relative_path LIKE ? || '/%'",
+                        (seg_rel, seg_rel),
+                    )
+                    seg_abs = f"{d_abs}/{seg}"
+                    conn.execute(
+                        "DELETE FROM dir_mtimes WHERE dir_path = ? OR dir_path LIKE ? || '/%'",
+                        (seg_abs, seg_abs),
+                    )
+                    stats["removed"] += cur.rowcount
+
+                # Subtree purge for removed/renamed child dirs: absent from scandir
+                # but still present in dir_mtimes baselines.
+                stored_children = conn.execute(
+                    "SELECT dir_path FROM dir_mtimes "
+                    "WHERE dir_path LIKE ? AND dir_path NOT LIKE ?",
+                    (f"{d_abs}/%", f"{d_abs}/%/%"),
+                ).fetchall()
+                for sc in stored_children:
+                    if Path(sc["dir_path"]).name in present_dirs:
+                        continue
+                    child_rel = Path(sc["dir_path"]).relative_to(root).as_posix()
+                    cur = conn.execute(
+                        "DELETE FROM images WHERE relative_path = ? OR relative_path LIKE ? || '/%'",
+                        (child_rel, child_rel),
+                    )
+                    conn.execute(
+                        "DELETE FROM dir_mtimes WHERE dir_path = ? OR dir_path LIKE ? || '/%'",
+                        (sc["dir_path"], sc["dir_path"]),
+                    )
+                    stats["removed"] += cur.rowcount
+
+                for name, e in present_files.items():
+                    try:
+                        mtime = e.stat().st_mtime
+                    except OSError:
+                        continue
+                    abs_str = str((d_path / name).resolve())
+                    old = old_by_seg.get(name)
+                    if old is None:
+                        conn.execute(
+                            "INSERT INTO images (file_path, filename, relative_path, last_modified, indexed_at) "
+                            "VALUES (?, ?, ?, ?, ?)",
+                            (abs_str, name, f"{prefix}{name}", mtime, now_iso),
+                        )
+                        stats["added"] += 1
+                    else:
+                        conn.execute(
+                            "UPDATE images SET file_path = ?, filename = ?, relative_path = ?, last_modified = ? WHERE id = ?",
+                            (abs_str, name, f"{prefix}{name}", mtime, old["id"]),
+                        )
+                        stats["updated"] += 1
+
+            post = os.stat(d_abs).st_mtime
+            if abs(pre - post) <= _MTIME_EPS:
+                with conn:
+                    conn.execute(
+                        "INSERT OR REPLACE INTO dir_mtimes (dir_path, mtime, scanned_at) VALUES (?, ?, ?)",
+                        (d_abs, post, now_iso),
+                    )
+            # else: a change raced the scan -> baseline left stale, next poll rescans.
+
+        stats["total"] = conn.execute("SELECT COUNT(*) AS c FROM images").fetchone()["c"]
+        return stats
     finally:
         conn.close()
 

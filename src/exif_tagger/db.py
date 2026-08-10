@@ -9,6 +9,8 @@ from __future__ import annotations
 import logging
 import os
 import sqlite3
+import threading
+import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -20,6 +22,19 @@ logger = logging.getLogger(__name__)
 
 _config_dir = Path(__file__).resolve().parent.parent.parent
 DEFAULT_DB_PATH = _config_dir / "gallery.db"
+
+# Short-TTL cache for the expensive scan+enrich+filter pipeline in get_gallery_images.
+# The gallery UI issues many rapid requests (page turns, tag toggles, search typing);
+# this makes those O(page) instead of O(N) per request. Filesystem stays the source of
+# truth — the cache only batches within a few seconds and is cleared on any DB write.
+_gallery_view_cache: dict[tuple[Any, ...], tuple[float, tuple]] = {}
+_gallery_view_cache_lock = threading.Lock()
+_GALLERY_VIEW_CACHE_TTL = 3.0
+
+
+def _invalidate_gallery_view_cache() -> None:
+    with _gallery_view_cache_lock:
+        _gallery_view_cache.clear()
 
 
 def get_db_path(custom_path: str | Path | None = None) -> Path:
@@ -74,6 +89,10 @@ def init_db(db_path: str | Path | None = None) -> None:
                 )
             """)
 
+            images_cols = {row["name"] for row in conn.execute("PRAGMA table_info(images)").fetchall()}
+            if "exif_mtime" not in images_cols:
+                conn.execute("ALTER TABLE images ADD COLUMN exif_mtime REAL;")
+
             # Schema migration check for existing image_tags table
             columns = {row["name"] for row in conn.execute("PRAGMA table_info(image_tags)").fetchall()}
             if "source" not in columns:
@@ -116,6 +135,14 @@ def init_db(db_path: str | Path | None = None) -> None:
                     reason TEXT DEFAULT 'manual_removal',
                     PRIMARY KEY (image_id, tag_name),
                     FOREIGN KEY(image_id) REFERENCES images(id) ON DELETE CASCADE
+                )
+            """)
+
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS dir_mtimes (
+                    dir_path TEXT PRIMARY KEY,
+                    mtime REAL NOT NULL,
+                    scanned_at TEXT NOT NULL
                 )
             """)
 
@@ -247,6 +274,7 @@ def sync_gallery_index(
 
                     updated_count += 1
 
+        _invalidate_gallery_view_cache()
         return {
             "total": len(scanned_paths),
             "indexed": len(scanned_map),
@@ -255,6 +283,100 @@ def sync_gallery_index(
         }
     finally:
         conn.close()
+
+
+def _build_gallery_view(
+    conn: sqlite3.Connection,
+    target_path: Path,
+    root_path: Path,
+    exclude_patterns: list[str] | None,
+    clean_tags: list[str],
+    search_pattern: str | None,
+    has_glob: bool,
+    is_cancelled: Callable[[], bool] | None,
+) -> tuple[list[tuple[Path, str, str]], dict[str, sqlite3.Row], dict[int, list[str]]] | None:
+    """Scan target_path, enrich with DB tags, and apply search/tag filters.
+
+    Returns (fs_items, db_map, tags_map) where fs_items is the fully filtered and
+    sorted list of (abs_path, rel_path, filename). Returns None if cancelled.
+    """
+    import fnmatch
+
+    scanned_paths = scan_images(target_path, exclude_patterns=exclude_patterns, is_cancelled=is_cancelled)
+
+    # Build list of (abs_path, rel_path, filename) matching search filter
+    fs_items: list[tuple[Path, str, str]] = []
+    for img_path in scanned_paths:
+        try:
+            rel_p = img_path.relative_to(root_path).as_posix()
+        except ValueError:
+            rel_p = img_path.name
+        fname = img_path.name
+
+        if search_pattern:
+            if has_glob:
+                if not (
+                    fnmatch.fnmatch(fname.lower(), search_pattern) or fnmatch.fnmatch(rel_p.lower(), search_pattern)
+                ):
+                    continue
+            else:
+                if search_pattern not in fname.lower() and search_pattern not in rel_p.lower():
+                    continue
+
+        if is_cancelled and is_cancelled():
+            return None
+
+        fs_items.append((img_path, rel_p, fname))
+
+    fs_items.sort(key=lambda item: (item[1].lower(), item[2].lower()))
+
+    # Batch-load all DB records and their tags for every file on disk
+    db_map: dict[str, sqlite3.Row] = {}
+    all_db_rows = conn.execute("SELECT id, file_path, filename, relative_path, last_modified FROM images").fetchall()
+    for r in all_db_rows:
+        raw_fp = r["file_path"]
+        p = Path(raw_fp)
+        abs_p = (root_path / p).resolve() if not p.is_absolute() else p.resolve()
+        db_map[str(abs_p)] = r
+        db_map[raw_fp] = r
+        db_map[r["relative_path"]] = r
+        rel_p = Path(r["relative_path"])
+        rel_abs = (root_path / rel_p).resolve()
+        db_map[str(rel_abs)] = r
+
+    unique_db_rows = {r["id"]: r for r in db_map.values()}
+    found_ids = list(unique_db_rows.keys())
+    tags_map: dict[int, list[str]] = {img_id: [] for img_id in found_ids}
+    if found_ids:
+        chunk_size = 900
+        for i in range(0, len(found_ids), chunk_size):
+            if is_cancelled and is_cancelled():
+                return None
+
+            chunk = found_ids[i : i + chunk_size]
+            id_placeholders = ",".join("?" for _ in chunk)
+            tag_rows = conn.execute(
+                f"SELECT image_id, tag_name FROM image_tags WHERE image_id IN ({id_placeholders}) ORDER BY tag_name ASC",
+                chunk,
+            ).fetchall()
+            for tr in tag_rows:
+                tags_map[tr["image_id"]].append(tr["tag_name"])
+
+    # Apply tag filter (in-memory, using DB-sourced tag data)
+    if clean_tags:
+        clean_tags_set = set(clean_tags)
+        filtered_items: list[tuple[Path, str, str]] = []
+        for img_path, rel_p, fname in fs_items:
+            abs_str = str(img_path.resolve())
+            db_row = db_map.get(abs_str)
+            if not db_row:
+                continue  # unindexed → no tags → cannot match tag filter
+            img_tags = set(tags_map.get(db_row["id"], []))
+            if clean_tags_set.issubset(img_tags):
+                filtered_items.append((img_path, rel_p, fname))
+        fs_items = filtered_items
+
+    return fs_items, db_map, tags_map
 
 
 def get_gallery_images(
@@ -279,8 +401,6 @@ def get_gallery_images(
 
     Returns (images_list, total_count).
     """
-    import fnmatch
-
     init_db(db_path)
     conn = get_connection(db_path)
     try:
@@ -335,90 +455,42 @@ def get_gallery_images(
             return [], 0
 
         # ------------------------------------------------------------------ #
-        # Scan filesystem                                                      #
+        # Build gallery view (scan + enrich + filter), cached for a few seconds#
         # ------------------------------------------------------------------ #
-        scanned_paths = scan_images(target_path, exclude_patterns=exclude_patterns, is_cancelled=is_cancelled)
-
         has_glob = search and any(char in search for char in ("*", "?", "["))
         search_pattern = search.strip().lower() if search else None
 
-        # Build list of (abs_path, rel_path, filename) matching search filter
-        fs_items: list[tuple[Path, str, str]] = []
-        for img_path in scanned_paths:
-            try:
-                rel_p = img_path.relative_to(root_path).as_posix()
-            except ValueError:
-                rel_p = img_path.name
-            fname = img_path.name
-
-            if search_pattern:
-                if has_glob:
-                    if not (
-                        fnmatch.fnmatch(fname.lower(), search_pattern) or fnmatch.fnmatch(rel_p.lower(), search_pattern)
-                    ):
-                        continue
-                else:
-                    if search_pattern not in fname.lower() and search_pattern not in rel_p.lower():
-                        continue
-
-            if is_cancelled and is_cancelled():
+        cache_key: tuple[Any, ...] = (
+            str(get_db_path(db_path)),
+            str(target_path.resolve()),
+            tuple(exclude_patterns or ()),
+            tuple(clean_tags),
+            search_pattern or "",
+        )
+        now = time.monotonic()
+        with _gallery_view_cache_lock:
+            entry = _gallery_view_cache.get(cache_key)
+        if entry is not None and now - entry[0] < _GALLERY_VIEW_CACHE_TTL:
+            fs_items, db_map, tags_map = entry[1]
+        else:
+            view = _build_gallery_view(
+                conn,
+                target_path,
+                root_path,
+                exclude_patterns,
+                clean_tags,
+                search_pattern,
+                has_glob,
+                is_cancelled,
+            )
+            if view is None:
                 return [], 0
-
-            fs_items.append((img_path, rel_p, fname))
-
-        fs_items.sort(key=lambda item: (item[1].lower(), item[2].lower()))
-
-        # ------------------------------------------------------------------ #
-        # Batch-load all DB records and their tags for every file on disk     #
-        # ------------------------------------------------------------------ #
-        db_map: dict[str, sqlite3.Row] = {}
-        all_db_rows = conn.execute(
-            "SELECT id, file_path, filename, relative_path, last_modified FROM images"
-        ).fetchall()
-        for r in all_db_rows:
-            raw_fp = r["file_path"]
-            p = Path(raw_fp)
-            abs_p = (root_path / p).resolve() if not p.is_absolute() else p.resolve()
-            db_map[str(abs_p)] = r
-            db_map[raw_fp] = r
-            db_map[r["relative_path"]] = r
-            rel_p = Path(r["relative_path"])
-            rel_abs = (root_path / rel_p).resolve()
-            db_map[str(rel_abs)] = r
-
-        unique_db_rows = {r["id"]: r for r in db_map.values()}
-        found_ids = list(unique_db_rows.keys())
-        tags_map: dict[int, list[str]] = {img_id: [] for img_id in found_ids}
-        if found_ids:
-            chunk_size = 900
-            for i in range(0, len(found_ids), chunk_size):
-                if is_cancelled and is_cancelled():
-                    return [], 0
-
-                chunk = found_ids[i : i + chunk_size]
-                id_placeholders = ",".join("?" for _ in chunk)
-                tag_rows = conn.execute(
-                    f"SELECT image_id, tag_name FROM image_tags WHERE image_id IN ({id_placeholders}) ORDER BY tag_name ASC",
-                    chunk,
-                ).fetchall()
-                for tr in tag_rows:
-                    tags_map[tr["image_id"]].append(tr["tag_name"])
-
-        # ------------------------------------------------------------------ #
-        # Apply tag filter (in-memory, using DB-sourced tag data)             #
-        # ------------------------------------------------------------------ #
-        if clean_tags:
-            clean_tags_set = set(clean_tags)
-            filtered_items: list[tuple[Path, str, str]] = []
-            for img_path, rel_p, fname in fs_items:
-                abs_str = str(img_path.resolve())
-                db_row = db_map.get(abs_str)
-                if not db_row:
-                    continue  # unindexed → no tags → cannot match tag filter
-                img_tags = set(tags_map.get(db_row["id"], []))
-                if clean_tags_set.issubset(img_tags):
-                    filtered_items.append((img_path, rel_p, fname))
-            fs_items = filtered_items
+            fs_items, db_map, tags_map = view
+            cutoff = time.monotonic() - _GALLERY_VIEW_CACHE_TTL
+            with _gallery_view_cache_lock:
+                for stale_key in [k for k, (ts, _) in _gallery_view_cache.items() if ts < cutoff]:
+                    del _gallery_view_cache[stale_key]
+                _gallery_view_cache[cache_key] = (time.monotonic(), view)
 
         # ------------------------------------------------------------------ #
         # Paginate and build result dicts                                      #
@@ -525,79 +597,45 @@ def get_gallery_folders(
     db_path: str | Path | None = None,
     root_directory: str | Path | None = None,
 ) -> dict[str, Any]:
-    """Get all subdirectories under relative_path (from disk and DB) with image count badges."""
+    """Get subdirectories under relative_path directly from disk (no image counts)."""
     from exif_tagger.config import load_config
 
-    init_db(db_path)
-    conn = get_connection(db_path)
-    try:
-        clean_rel = relative_path.strip().strip("/").replace("\\", "/")
-        if clean_rel == ".":
-            clean_rel = ""
-
-        # Determine root directory on disk
-        if root_directory is None:
+    if root_directory is None:
+        try:
             config = load_config()
             root_directory = config.root_directory
+        except Exception:
+            root_directory = Path(".")
 
-        root_path = Path(root_directory).resolve()
-        target_dir = (root_path / clean_rel).resolve() if clean_rel else root_path
+    clean_rel = relative_path.strip().strip("/").replace("\\", "/")
+    if clean_rel == ".":
+        clean_rel = ""
 
-        all_subfolders: set[str] = set()
-        subfolders_count: dict[str, int] = {}
+    root_path = Path(root_directory).resolve()
+    target_dir = (root_path / clean_rel).resolve() if clean_rel else root_path
 
-        # 1. Physical disk scan
-        if target_dir.exists() and target_dir.is_dir():
-            for item in target_dir.iterdir():
-                if item.is_dir() and not item.name.startswith("."):
-                    all_subfolders.add(item.name)
+    all_subfolders: set[str] = set()
+    if target_dir.exists() and target_dir.is_dir():
+        for item in target_dir.iterdir():
+            if item.is_dir() and not item.name.startswith("."):
+                all_subfolders.add(item.name)
 
-        # 2. DB scan for image counts and DB-known folders
-        rows = conn.execute("SELECT relative_path FROM images").fetchall()
-        for r in rows:
-            rel_p = r["relative_path"].replace("\\", "/")
-            parts = [p for p in rel_p.split("/") if p]
-            clean_rel_lower = clean_rel.lower()
+    folders_list = [
+        {"name": name, "relative_path": f"{clean_rel}/{name}" if clean_rel else name} for name in sorted(all_subfolders)
+    ]
 
-            if not clean_rel:
-                if len(parts) > 1:
-                    child_folder = parts[0]
-                    all_subfolders.add(child_folder)
-                    subfolders_count[child_folder] = subfolders_count.get(child_folder, 0) + 1
-            else:
-                rel_parts = [p.lower() for p in clean_rel_lower.split("/") if p]
-                depth = len(rel_parts)
-                if len(parts) > depth + 1 and [p.lower() for p in parts[:depth]] == rel_parts:
-                    child_folder = parts[depth]
-                    all_subfolders.add(child_folder)
-                    subfolders_count[child_folder] = subfolders_count.get(child_folder, 0) + 1
+    breadcrumbs = [{"name": "Root", "path": ""}]
+    if clean_rel:
+        accum = []
+        for part in clean_rel.split("/"):
+            accum.append(part)
+            breadcrumbs.append({"name": part, "path": "/".join(accum)})
 
-        folders_list = []
-        for name in sorted(all_subfolders):
-            full_path = f"{clean_rel}/{name}" if clean_rel else name
-            folders_list.append(
-                {
-                    "name": name,
-                    "relative_path": full_path,
-                    "image_count": subfolders_count.get(name, 0),
-                }
-            )
-
-        breadcrumbs = [{"name": "Root", "path": ""}]
-        if clean_rel:
-            accum = []
-            for part in clean_rel.split("/"):
-                accum.append(part)
-                breadcrumbs.append({"name": part, "path": "/".join(accum)})
-
-        return {
-            "current_path": clean_rel,
-            "breadcrumbs": breadcrumbs,
-            "folders": folders_list,
-            "total_images": len(rows),
-        }
-    finally:
-        conn.close()
+    return {
+        "current_path": clean_rel,
+        "breadcrumbs": breadcrumbs,
+        "folders": folders_list,
+    }
 
 
 def get_all_tags(db_path: str | Path | None = None) -> list[str]:
@@ -689,6 +727,7 @@ def update_image_tags_in_db_and_exif(
                     "INSERT OR IGNORE INTO image_tags (image_id, tag_name, source, added_at) VALUES (?, ?, ?, ?)",
                     (image_id, t, source, now_iso),
                 )
+        _invalidate_gallery_view_cache()
         return True
     finally:
         conn.close()
@@ -762,6 +801,7 @@ def batch_update_tags(
                         )
                 modified_count += 1
 
+        _invalidate_gallery_view_cache()
         return modified_count
     finally:
         conn.close()
@@ -865,6 +905,7 @@ def update_image_in_db_from_file(
                         "INSERT OR IGNORE INTO image_tags (image_id, tag_name) VALUES (?, ?)",
                         (image_id, clean_tag),
                     )
+        _invalidate_gallery_view_cache()
     finally:
         conn.close()
 

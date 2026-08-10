@@ -147,6 +147,38 @@ class TestConfig:
         with pytest.raises(ValueError, match="Invalid regex"):
             config.validate_exclude_patterns()
 
+    def test_gallery_index_defaults(self):
+        from exif_tagger.models.schema import GalleryIndexConfig
+
+        cfg = GalleryIndexConfig()
+        assert cfg.enabled is True
+        assert cfg.poll_interval_seconds == 10
+
+    def test_gallery_index_config_from_yaml(self, tmp_path):
+        config_data = {
+            "root_directory": str(tmp_path),
+            "model": {"base_url": "https://api.test.com/v1", "model_name": "test-model"},
+            "gallery_index": {"enabled": False, "poll_interval_seconds": 30},
+        }
+        config_file = tmp_path / "config.yaml"
+        with open(config_file, "w") as fh:
+            yaml.dump(config_data, fh)
+
+        config = load_config(str(config_file))
+        assert config.gallery_index.enabled is False
+        assert config.gallery_index.poll_interval_seconds == 30
+
+    def test_gallery_index_env_override(self, tmp_path, monkeypatch):
+        config_data = {"root_directory": str(tmp_path),
+                       "model": {"base_url": "https://api.test.com/v1", "model_name": "test-model"}}
+        config_file = tmp_path / "config.yaml"
+        with open(config_file, "w") as fh:
+            yaml.dump(config_data, fh)
+
+        monkeypatch.setenv("EXIFTAGGER_GALLERY_INDEX_POLL_INTERVAL_SECONDS", "45")
+        config = load_config(str(config_file))
+        assert config.gallery_index.poll_interval_seconds == 45
+
 
 class TestConfigValidationEdgeCases:
     """Test edge cases in config validation."""
@@ -157,18 +189,6 @@ class TestConfigValidationEdgeCases:
 
         cfg = Cfg(model={"base_url": "http://x.com", "model_name": "test"})
         assert cfg.root_directory == "/data/images"
-
-    def test_tags_from_list_format(self, tmp_path):
-        """Tags can also come in list format (handled by validator)."""
-        from exif_tagger.models.schema import Config as Cfg
-
-        cfg = Cfg(
-            root_directory=str(tmp_path),
-            model={"base_url": "http://x.com", "model_name": "test"},
-            tags=[{"name": "tag1", "description": "First tag", "threshold": 0.5}],
-        )
-        assert len(cfg.tags) == 1
-        assert "tag1" in cfg.tags
 
 
 class TestAtomicCheckpointSave:

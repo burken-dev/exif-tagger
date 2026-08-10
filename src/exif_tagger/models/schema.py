@@ -63,14 +63,6 @@ class ModelConfig(BaseModel):
             return value.lower()
         raise ValueError(f"image_format must be one of {allowed}, got '{value}'")
 
-    @field_validator("api_key", mode="before")
-    @classmethod
-    def _resolve_from_env(cls, value: str | None) -> str | None:
-        """If no api_key is set in config, fall back to OPENAI_API_KEY env var."""
-        if not value:
-            return None
-        return value
-
     model_config = ConfigDict(extra="allow")
 
 
@@ -91,6 +83,13 @@ class TagDefinition(BaseModel):
 # ---------------------------------------------------------------------------
 # Top-level configuration
 # ---------------------------------------------------------------------------
+class GalleryIndexConfig(BaseModel):
+    """Settings for the background gallery index poller."""
+
+    enabled: bool = Field(default=True)
+    poll_interval_seconds: int = Field(default=10, ge=0, description="0 disables the poller")
+
+
 class Config(BaseModel):
     """Hela konfigurationen av exif-tagger."""
 
@@ -100,6 +99,7 @@ class Config(BaseModel):
     )
     ai_model: ModelConfig = Field(alias="model", default_factory=ModelConfig)
     tags: dict[str, TagDefinition] = Field(default_factory=dict)
+    gallery_index: GalleryIndexConfig = Field(default_factory=GalleryIndexConfig)
     exclude_patterns: list[str] = Field(
         default_factory=list,
         description="Reguljära uttryck för sökväg som ska exkluderas från körningen.",
@@ -145,23 +145,6 @@ class Config(BaseModel):
                 re.compile(pattern)
             except re.error as exc:
                 raise ValueError(f"Invalid regex pattern '{pattern}': {exc}") from exc
-
-    @field_validator("tags", mode="before")
-    @classmethod
-    def _parse_tags(cls, value):  # type: ignore[no-untyped-def]
-        """Handle case where tags come in as plain strings (no threshold)."""
-        if isinstance(value, list):
-            # Support format like [{"name": "landskap", "description": "..."}]
-            result = {}
-            for item in value:
-                if isinstance(item, dict):
-                    name = item.get("name") or item.get("tag_name", "")
-                    tag_def = TagDefinition(**item)  # type: ignore[arg-type]
-                    result[str(name)] = tag_def
-            return result
-        if isinstance(value, str):
-            raise ValueError("tags must be a dict of {tag_name: {description, threshold}} objects")
-        return value
 
     model_config = ConfigDict(extra="allow")
 

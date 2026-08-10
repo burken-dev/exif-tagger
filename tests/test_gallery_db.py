@@ -56,6 +56,20 @@ class TestGalleryDatabase:
         init_db(test_db_path)
         assert test_db_path.exists()
 
+    def test_init_db_creates_dir_mtimes_and_exif_mtime(self, test_db_path):
+        from exif_tagger.db import get_connection, init_db
+
+        init_db(test_db_path)
+        conn = get_connection(test_db_path)
+        try:
+            tables = {r["name"] for r in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'")}
+            assert "dir_mtimes" in tables
+            cols = {r["name"] for r in conn.execute("PRAGMA table_info(images)")}
+            assert "exif_mtime" in cols
+        finally:
+            conn.close()
+
     def test_sync_gallery_index(self, test_db_path, image_gallery_dir):
         gallery_dir, img_paths = image_gallery_dir
 

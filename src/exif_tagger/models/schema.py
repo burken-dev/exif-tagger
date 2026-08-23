@@ -156,8 +156,11 @@ class TagResult(BaseModel):
     """One tag evaluation result from the AI."""
 
     tag_name: str
+    reason: str | None = Field(
+        default=None,
+        description="Brief factual explanation referencing visible elements or why it does not match.",
+    )
     score: float = Field(ge=0.0, le=1.0, description="Confidence score 0-1")
-    reason: str | None = None
 
 
 class TaggingResponse(BaseModel):

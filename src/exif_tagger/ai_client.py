@@ -141,7 +141,8 @@ def _build_prompt(
         "   - Score 0.4 to 0.7: Partial, ambiguous, or background presence of the tag's criteria.",
         "   - Score 0.0 to 0.3: The tag's criteria are absent, not visible, or merely speculative.",
         "5. ANTI-HALLUCINATION RULE: If a tag does not match the image or is absent, assign a low confidence score (0.0 to 0.1). Do not guess, speculate, or hallucinate elements that cannot be directly seen.",
-        "6. You must evaluate every tag in the list.",
+        "6. SPARSITY & MUTUAL EXCLUSIVITY: Most photos match 0 or at most 1 tag. It is rare for 2 tags to match, and virtually impossible for 3 or more disparate categories to apply. Only assign high confidence to the primary dominant subject.",
+        "7. You must evaluate every tag in the list.",
         "",
         "Tags to evaluate:",
     ]

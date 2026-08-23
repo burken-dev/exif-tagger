@@ -65,10 +65,17 @@ export interface ModelConfig {
   params?: Record<string, any>;
 }
 
+export interface GuardrailConfig {
+  enabled?: boolean;
+  max_matched_tags?: number;
+  on_overflow?: 'suppress' | 'top_k' | 'warn';
+}
+
 export interface AppConfig {
   root_directory: string;
   model: ModelConfig;
   tags: Record<string, TagConfig>;
+  guardrails?: GuardrailConfig;
   exclude_patterns: string[];
   log_level?: string;
   log_dir?: string;

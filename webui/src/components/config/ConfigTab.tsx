@@ -26,6 +26,7 @@ import {
   Eye,
   EyeOff,
   Sparkles,
+  ShieldAlert,
 } from 'lucide-react';
 import type { AppConfig, TagConfig } from '@/types';
 import { AdvancedApiParams } from './AdvancedApiParams';
@@ -77,6 +78,11 @@ const defaultConfig: AppConfig = {
       user_prompt:
         'Analyze the image and evaluate each target tag. Assign a confidence score from 0.0 to 1.0 for each tag based strictly on visual evidence.',
     },
+  },
+  guardrails: {
+    enabled: true,
+    max_matched_tags: 2,
+    on_overflow: 'suppress',
   },
   tags: {
     nature: { description: 'Natural landscapes, plants, trees, outdoors', threshold: 0.7 },
@@ -642,7 +648,102 @@ export const ConfigTab: React.FC = () => {
         </CardContent>
       </Card>
 
-      {/* Section 4: Tag Definitions & Thresholds */}
+      {/* Section 4: Hallucination Guardrails */}
+      <Card className="border-border">
+        <CardHeader>
+          <div className="flex items-center gap-2">
+            <ShieldAlert className="w-5 h-5 text-primary" />
+            <CardTitle>Hallucination Guardrails</CardTitle>
+          </div>
+          <CardDescription>
+            Safety protections to prevent vision models from tagging photos with multiple conflicting or hallucinated tags.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-5">
+          <div className="flex items-center justify-between p-3 rounded-lg bg-accent/40 border border-border">
+            <div className="space-y-0.5">
+              <label className="text-sm font-medium text-foreground cursor-pointer">
+                Enable Overflow Guardrail
+              </label>
+              <p className="text-xs text-muted-foreground">
+                Automatically detect when a model hallucinates and matches more tags than expected on a single image.
+              </p>
+            </div>
+            <Switch
+              checked={formData.guardrails?.enabled ?? true}
+              onCheckedChange={(checked) =>
+                setFormData((prev) => ({
+                  ...prev,
+                  guardrails: {
+                    enabled: checked,
+                    max_matched_tags: prev.guardrails?.max_matched_tags ?? 2,
+                    on_overflow: prev.guardrails?.on_overflow ?? 'suppress',
+                  },
+                }))
+              }
+            />
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium text-foreground">Max Matched Tags Per Image</label>
+              <Input
+                type="number"
+                min="1"
+                max="10"
+                value={formData.guardrails?.max_matched_tags ?? 2}
+                onChange={(e) =>
+                  setFormData((prev) => ({
+                    ...prev,
+                    guardrails: {
+                      enabled: prev.guardrails?.enabled ?? true,
+                      max_matched_tags: parseInt(e.target.value) || 2,
+                      on_overflow: prev.guardrails?.on_overflow ?? 'suppress',
+                    },
+                  }))
+                }
+                className="text-sm"
+              />
+              <p className="text-xs text-muted-foreground">
+                Maximum tags allowed to match for a single photo (typically 1 or 2).
+              </p>
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium text-foreground">Action on Overflow</label>
+              <select
+                value={formData.guardrails?.on_overflow ?? 'suppress'}
+                onChange={(e) =>
+                  setFormData((prev) => ({
+                    ...prev,
+                    guardrails: {
+                      enabled: prev.guardrails?.enabled ?? true,
+                      max_matched_tags: prev.guardrails?.max_matched_tags ?? 2,
+                      on_overflow: e.target.value as 'suppress' | 'top_k' | 'warn',
+                    },
+                  }))
+                }
+                className="w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              >
+                <option value="suppress" className="bg-popover text-popover-foreground">
+                  Suppress (Safest: do not write any EXIF tags)
+                </option>
+                <option value="top_k" className="bg-popover text-popover-foreground">
+                  Keep Top K (Keep highest scoring tags only)
+                </option>
+                <option value="warn" className="bg-popover text-popover-foreground">
+                  Warn Only (Log warning and write all matches)
+                </option>
+              </select>
+              <p className="text-xs text-muted-foreground">
+                Behavior when matched tags exceed the max limit.
+              </p>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Section 5: Tag Definitions & Thresholds */}
       <Card className="border-border">
         <CardHeader>
           <div className="flex items-center gap-2">

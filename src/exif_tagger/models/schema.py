@@ -83,6 +83,30 @@ class TagDefinition(BaseModel):
 # ---------------------------------------------------------------------------
 # Top-level configuration
 # ---------------------------------------------------------------------------
+class GuardrailConfig(BaseModel):
+    """Safety guardrails against model hallucination cascades and multi-tag overflow."""
+
+    enabled: bool = Field(default=True, description="Enable hallucination overflow guardrails.")
+    max_matched_tags: int = Field(
+        default=2,
+        ge=1,
+        le=20,
+        description="Maximum number of tags allowed to match for a single image.",
+    )
+    on_overflow: str = Field(
+        default="suppress",
+        description="Action when matched tags exceed max_matched_tags: 'suppress' (safest: do not write EXIF tags), 'top_k' (keep top N highest scoring tags), or 'warn' (log warning and proceed).",
+    )
+
+    @field_validator("on_overflow", mode="before")
+    @classmethod
+    def _validate_on_overflow(cls, value: Any) -> str:
+        valid_actions = {"suppress", "top_k", "warn"}
+        if isinstance(value, str) and value.lower() in valid_actions:
+            return value.lower()
+        raise ValueError(f"on_overflow must be one of {valid_actions}, got '{value}'")
+
+
 class GalleryIndexConfig(BaseModel):
     """Settings for the background gallery index poller."""
 
@@ -100,6 +124,7 @@ class Config(BaseModel):
     ai_model: ModelConfig = Field(alias="model", default_factory=ModelConfig)
     tags: dict[str, TagDefinition] = Field(default_factory=dict)
     gallery_index: GalleryIndexConfig = Field(default_factory=GalleryIndexConfig)
+    guardrails: GuardrailConfig = Field(default_factory=GuardrailConfig)
     exclude_patterns: list[str] = Field(
         default_factory=list,
         description="Reguljära uttryck för sökväg som ska exkluderas från körningen.",

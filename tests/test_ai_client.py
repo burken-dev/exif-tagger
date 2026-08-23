@@ -73,6 +73,22 @@ class TestParseResponse:
         assert result.results[1].tag_name == "portrait"
         assert result.results[1].score == 0.2
 
+    def test_valid_json_response_with_scene_description(self):
+        response_str = json.dumps(
+            {
+                "scene_description": "A snowy mountain peak with blue skies.",
+                "results": [
+                    {"tag_name": "mountain", "score": 0.98, "reason": "Snowy peak in center"},
+                ],
+            }
+        )
+
+        result = _parse_response(response_str)
+        assert result.scene_description == "A snowy mountain peak with blue skies."
+        assert result.summary == "A snowy mountain peak with blue skies."
+        assert len(result.results) == 1
+        assert result.results[0].tag_name == "mountain"
+
     def test_json_in_markdown_code_blocks(self):
         """Model may wrap JSON in ```json ... ``` blocks – should be handled."""
         response_str = '```json\n{"results": [{"tag_name": "x", "score": 0.8}]}\n```\n'

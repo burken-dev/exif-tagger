@@ -130,8 +130,18 @@ def _build_prompt(
 ) -> str:
     """Build the prompt that asks the model to evaluate all tags for one image."""
     lines = [
-        "Analyze this image and assign a confidence score (0.0–1.0) for EACH of the following tags.",
-        "You must include every tag in your response, even if you are not confident it applies.",
+        "You are an expert image tagging and visual analysis system.",
+        "Your task is to analyze the image objectively and evaluate each candidate tag strictly based on visible visual evidence.",
+        "",
+        "Evaluation Instructions:",
+        "1. First, write a concise factual description of what is actually visible in the scene ('scene_description') to ground your analysis.",
+        "2. Then, evaluate EACH tag in the list against the visual evidence in the image.",
+        "3. Assign a confidence score from 0.0 to 1.0 based on strict visual criteria:",
+        "   - Score 0.8 to 1.0: The tag's criteria are clearly, prominently, and unambiguously visible in the image.",
+        "   - Score 0.4 to 0.7: Partial, ambiguous, or background presence of the tag's criteria.",
+        "   - Score 0.0 to 0.3: The tag's criteria are absent, not visible, or merely speculative.",
+        "4. ANTI-HALLUCINATION RULE: If a tag does not match the image or is absent, assign a low confidence score (0.0 to 0.1) with a brief reason. Do not guess or assume elements that cannot be directly seen.",
+        "5. You must evaluate every tag in the list.",
         "",
         "Tags to evaluate:",
     ]
@@ -143,10 +153,15 @@ def _build_prompt(
         lines.extend(
             [
                 "",
-                "Respond ONLY with valid JSON. Use this structure (no trailing commas):",
+                "Respond ONLY with valid JSON. Use this exact structure (no trailing commas):",
                 "{",
+                '  "scene_description": "<concise factual description of what is visible in the image>",',
                 '  "results": [',
-                '    {"tag_name": "<tag>", "score": 0.85, "reason": "<brief reason>"}',
+                '    {',
+                '      "tag_name": "<tag>",',
+                '      "score": 0.85,',
+                '      "reason": "<brief factual reason referencing visible elements or explaining absence>"',
+                "    }",
                 "  ]",
                 "}",
                 "",
@@ -214,7 +229,13 @@ def _parse_response(content: str | bytes) -> TaggingResponse:
         except (KeyError, ValueError, TypeError) as exc:
             logger.warning("Skipping invalid tag result in AI response: %s", exc)
 
-    return TaggingResponse(results=tag_results, summary=parsed.get("summary"))
+    scene_description = parsed.get("scene_description")
+    summary = parsed.get("summary") or scene_description
+    return TaggingResponse(
+        results=tag_results,
+        scene_description=scene_description,
+        summary=summary,
+    )
 
 
 def _log_api_error_details(

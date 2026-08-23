@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
 from PIL import Image
 
@@ -102,34 +100,3 @@ class TestExcludeCompilers:
         compilers = build_exclude_compilers(["[invalid"])
         # The invalid pattern is silently skipped (warning logged), not raised
         assert len(compilers) == 0  # None were compiled successfully
-
-
-class TestFilterByCheckpoint:
-    """Test filtering images against existing checkpoint data."""
-
-    def test_filter_skips_done_images(self):
-        from exif_tagger.image_scanner import filter_by_checkpoint
-        from exif_tagger.models.schema import ImageCheckpoint
-
-        all_images = [Path("/a/b/1.jpg"), Path("/a/b/2.jpg"), Path("/a/b/3.jpg")]
-        checkpoint = {
-            str(Path("/a/b/1.jpg").resolve()): ImageCheckpoint(
-                path=str(Path("/a/b/1.jpg")), status="done", matched_tags=["tag1"]
-            ),
-            str(Path("/a/b/2.jpg").resolve()): ImageCheckpoint(
-                path=str(Path("/a/b/2.jpg")), status="failed", error="timeout"
-            ),
-        }
-
-        to_process, done_count = filter_by_checkpoint(all_images, checkpoint)
-        # 1 is "done" → skipped. 2 is "failed" (not done) and 3 not in checkpoint
-        assert len(to_process) == 2
-        assert done_count == 1
-
-    def test_filter_no_checkpoint(self):
-        from exif_tagger.image_scanner import filter_by_checkpoint
-
-        all_images = [Path("/a/b/1.jpg"), Path("/a/b/2.jpg")]
-        to_process, done_count = filter_by_checkpoint(all_images, {})
-        assert len(to_process) == 2
-        assert done_count == 0

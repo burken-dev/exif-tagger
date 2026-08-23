@@ -50,16 +50,11 @@ def test_get_gallery_folders(tmp_path: Path):
     assert "vacation" in folder_names
     assert "work" in folder_names
 
-    # Check vacation image count (vac1.jpg + 2024/beach.png = 2)
-    vac_folder = next(f for f in res_root["folders"] if f["name"] == "vacation")
-    assert vac_folder["image_count"] == 2
-
     # 2. Test subfolder listing under "vacation"
     res_vac = get_gallery_folders(relative_path="vacation", db_path=db_file, root_directory=root)
     assert res_vac["current_path"] == "vacation"
     assert len(res_vac["folders"]) == 1
     assert res_vac["folders"][0]["name"] == "2024"
-    assert res_vac["folders"][0]["image_count"] == 1
 
 
 def test_get_gallery_images_folder_scoping(tmp_path: Path):
@@ -136,6 +131,3 @@ def test_get_gallery_folders_unindexed_folders(tmp_path: Path):
     assert "indexed_folder" in folder_names
     assert "empty_unindexed_folder" in folder_names
     assert "new_unindexed_dir" in folder_names
-
-    unindexed_item = next(f for f in res["folders"] if f["name"] == "new_unindexed_dir")
-    assert unindexed_item["image_count"] == 0

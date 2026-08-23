@@ -7,7 +7,7 @@ import re
 from collections.abc import Callable
 from pathlib import Path
 
-from exif_tagger.models.schema import IMAGE_EXTENSIONS, ImageCheckpoint
+from exif_tagger.models.schema import IMAGE_EXTENSIONS
 
 logger = logging.getLogger(__name__)
 
@@ -79,8 +79,9 @@ def scan_images(
             if not _is_image_path(file_path):
                 continue
 
-            # Check exclude patterns against relative path (as posix-style string)
-            full_rel = (file_path.relative_to(root)).as_posix() if file_path.is_file() else ""
+            # Check exclude patterns against relative path (as posix-style string).
+            # Path.walk() only lists files here, so no extra stat needed.
+            full_rel = file_path.relative_to(root).as_posix()
 
             excluded = False
             for compiler in compilers:
@@ -97,28 +98,3 @@ def scan_images(
 
     logger.debug("Found %d images in %s", len(image_paths), root)
     return image_paths
-
-
-def filter_by_checkpoint(all_images: list[Path], checkpoint: dict[str, ImageCheckpoint]) -> tuple[list[Path], int]:
-    """Separate images into 'to_process' and count of already-done ones.
-
-    Args:
-        all_images: Complete sorted list of image paths to consider.
-        checkpoint: Dict mapping absolute path strings → ImageCheckpoint objects.
-
-    Returns:
-        Tuple of (images_to_process, number_already_done).
-    """
-
-    images_to_process: list[Path] = []
-    already_done = 0
-
-    for img_path in all_images:
-        abs_str = str(img_path.resolve())
-        cp_entry = checkpoint.get(abs_str)
-        if cp_entry is not None and cp_entry.status == "done":
-            already_done += 1
-        else:
-            images_to_process.append(img_path)
-
-    return images_to_process, already_done

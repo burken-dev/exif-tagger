@@ -13,7 +13,6 @@ export interface GalleryImage {
 export interface FolderItem {
   name: string;
   relative_path: string;
-  image_count: number;
 }
 
 export interface FolderBreadcrumb {

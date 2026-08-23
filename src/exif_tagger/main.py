@@ -329,12 +329,12 @@ class PipelineEngine:
                 exclude_patterns=config.exclude_patterns or [],
             )
 
-            from exif_tagger.image_scanner import scan_images
+            from exif_tagger import image_scanner
 
             if target_subfolder:
                 sub_dir = (base_gallery_root / target_subfolder).resolve()
                 if sub_dir.exists() and sub_dir.is_dir():
-                    scanned_sub = scan_images(sub_dir, exclude_patterns=config.exclude_patterns or [])
+                    scanned_sub = image_scanner.scan_images(sub_dir, exclude_patterns=config.exclude_patterns or [])
                     total_found = len(scanned_sub)
                 else:
                     conn = get_connection()
@@ -379,15 +379,14 @@ class PipelineEngine:
             if max_images and max_images > 0 and len(images_to_process) > max_images:
                 images_to_process = images_to_process[:max_images]
 
-            logger.info(
-                "%d total images in folder, %d require vision model evaluation.",
-                total_found,
-                len(images_to_process),
-            )
-
-            session_total = total_found
+            session_total = len(images_to_process)
 
             if not images_to_process:
+                self.state.start(0)
+                logger.info(
+                    "Found 0 images in processing plan (all %d images in folder are already up to date).",
+                    total_found,
+                )
                 summary = {
                     "root_directory": config.root_directory,
                     "total_images_found": total_found,
@@ -398,11 +397,16 @@ class PipelineEngine:
                     "failed": 0,
                     "errors": [],
                 }
-                self.state.start(session_total)
                 self.state.finish(summary)
                 return summary
 
             self.state.start(session_total)
+
+            logger.info(
+                "Found %d images in processing plan (%d total images in folder).",
+                len(images_to_process),
+                total_found,
+            )
 
             successfully_tagged = 0
             failed_count = 0

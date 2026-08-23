@@ -71,6 +71,19 @@ class TestScanImages:
         images = scan_images(tmp_path, is_cancelled=is_cancelled)
         assert len(images) < 10, "scan_images should have stopped early"
 
+    def test_scan_images_logs_at_debug_level(self, tmp_path, caplog):
+        """scan_images should log found count at DEBUG level, not INFO."""
+        import logging
+
+        Image.new("RGB", (50, 50)).save(tmp_path / "img1.jpg")
+        with caplog.at_level(logging.DEBUG):
+            scan_images(tmp_path)
+
+        info_records = [r for r in caplog.records if r.levelno == logging.INFO and "Found" in r.message]
+        debug_records = [r for r in caplog.records if r.levelno == logging.DEBUG and "Found" in r.message]
+        assert len(info_records) == 0, "scan_images should not emit 'Found ... images' at INFO level"
+        assert len(debug_records) >= 1, "scan_images should emit 'Found ... images' at DEBUG level"
+
 
 class TestExcludeCompilers:
     """Test regex compiler builder for exclude patterns."""

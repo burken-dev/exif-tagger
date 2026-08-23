@@ -17,8 +17,9 @@ case "${1:-up}" in
     docker rm "$CONTAINER_NAME" 2>/dev/null || true
     docker run -d --name "$CONTAINER_NAME" \
       -p "${PORT}:8080" \
+      --network docker_default \
       "$IMAGE_NAME"
-    echo "Server available at http://localhost:${PORT}"
+    echo "Server available at http://${CONTAINER_NAME}:8080"
     ;;
 
   test)
@@ -28,7 +29,7 @@ case "${1:-up}" in
 
   test-e2e)
     echo "=== Running E2E Playwright Tests against Container ==="
-    E2E_SERVER_URL="http://localhost:${PORT}" pytest tests/e2e/ "${@:2}"
+    E2E_SERVER_URL="http://${CONTAINER_NAME}:8080" pytest tests/e2e/ "${@:2}"
     ;;
 
   logs)

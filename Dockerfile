@@ -57,7 +57,8 @@ WORKDIR /app
 
 RUN pip install --no-cache-dir pytest pytest-cov requests
 
-RUN mkdir -p /app/testimages /app/data
+RUN mkdir -p /app/data
 
+COPY testimages/ /data/images/
 COPY tests/ ./tests/
 

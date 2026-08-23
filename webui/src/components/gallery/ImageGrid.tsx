@@ -59,7 +59,7 @@ export const ImageGrid: React.FC<ImageGridProps> = ({
             variant="ghost"
             size="sm"
             onClick={onDeselectAll}
-            disabled={selectedOnPage === 0}
+            disabled={selectedImageIds.size === 0}
             className="h-7 text-xs gap-1.5 text-muted-foreground hover:text-foreground"
           >
             <Square className="w-3.5 h-3.5" />
@@ -70,6 +70,11 @@ export const ImageGrid: React.FC<ImageGridProps> = ({
         <div className="text-muted-foreground font-medium">
           Selected on page:{' '}
           <span className="text-foreground font-bold">{selectedOnPage}</span> / {images.length}
+          {selectedImageIds.size > selectedOnPage && (
+            <span className="text-xs text-muted-foreground ml-1.5">
+              ({selectedImageIds.size} total)
+            </span>
+          )}
         </div>
       </div>
 

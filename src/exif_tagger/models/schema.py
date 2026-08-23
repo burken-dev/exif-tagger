@@ -163,6 +163,10 @@ class TagResult(BaseModel):
 class TaggingResponse(BaseModel):
     """Full response from vision model for a single image."""
 
+    scene_description: str | None = Field(
+        default=None,
+        description="A brief factual description of what is actually visible in the scene, used for visual grounding.",
+    )
     results: list[TagResult]
     summary: str | None = None
 

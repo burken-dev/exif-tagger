@@ -340,7 +340,7 @@ class TestPipelineEngineIntegration:
         img1 = PILImage.new("RGB", (50, 50), color="blue")
         img1.save(img1_path)
 
-        db_path = tmp_path / "gallery.db"
+        db_path = tmp_path / "gallery1.db"
 
         mock_response = MagicMock()
         mock_response.results = [TagResult(tag_name="dog", score=0.9)]
@@ -372,10 +372,62 @@ class TestPipelineEngineIntegration:
                         summary = engine.start_session(root_directory=str(images_dir))
 
         images, total = get_gallery_images(db_path=db_path)
-        print("DEBUG images in db:", [img["filename"] for img in images])
         assert total == 1
         assert images[0]["filename"] == "test1.jpg"
         assert "dog" in images[0]["tags"]
+
+    def test_start_session_logs_processing_plan_and_sets_plan_total(self, tmp_path):
+        from unittest.mock import MagicMock, patch
+
+        from PIL import Image as PILImage
+
+        from exif_tagger.models.schema import TagResult
+
+        images_dir = tmp_path / "plan_test_images"
+        images_dir.mkdir(exist_ok=True)
+        img1_path = images_dir / "test1.jpg"
+        img2_path = images_dir / "test2.jpg"
+        PILImage.new("RGB", (50, 50), color="blue").save(img1_path)
+        PILImage.new("RGB", (50, 50), color="green").save(img2_path)
+
+        db_path = tmp_path / "gallery2.db"
+
+        mock_response = MagicMock()
+        mock_response.results = [TagResult(tag_name="cat", score=0.9)]
+
+        class MockTagDef:
+            description = "A cat"
+            threshold = 0.5
+
+        class MockConfig:
+            root_directory: str = str(images_dir)
+            tags: dict[str, MagicMock] = {"cat": MockTagDef()}
+            exclude_patterns: list | None = None
+            ai_model: str = "test-model"
+            max_image_dimension: int = 1024
+
+            def validate(self):
+                pass
+
+            def validate_exclude_patterns(self):
+                pass
+
+        with patch("exif_tagger.config.load_config", return_value=MockConfig()):
+            with patch("exif_tagger.ai_client.setup_secure_logging"):
+                with patch("exif_tagger.ai_client.tag_image_with_ai", return_value=mock_response):
+                    with patch("exif_tagger.db.get_db_path", return_value=db_path):
+                        from exif_tagger.main import PipelineEngine
+
+                        engine = PipelineEngine(config_path="config.yaml")
+                        # Process with max_images=1 out of 2 found
+                        summary = engine.start_session(root_directory=str(images_dir), max_images=1)
+
+                        logs = [l["text"] for l in engine.state.get_logs()]
+                        assert any("Found 1 images in processing plan (2 total images in folder)." in l for l in logs)
+                        assert summary["total_images_found"] == 2
+                        assert summary["total_processed"] == 1
+                        assert engine.state.total == 1
+
 
 
 class TestRunFunction:

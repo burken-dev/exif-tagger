@@ -177,11 +177,31 @@ export function useGallery() {
 
       setImages(data.images || []);
       setTotalImages(data.total || 0);
+
+      // Clear or prune selection
+      if (!data.total || data.total === 0) {
+        setSelectedImageIds(new Set());
+      } else if (data.total <= (data.images || []).length) {
+        const validIds = new Set(
+          (data.images || [])
+            .map((img: GalleryImage) => img.id)
+            .filter((id: number | null): id is number => id !== null)
+        );
+        setSelectedImageIds((prev) => {
+          if (prev.size === 0) return prev;
+          const next = new Set<number>();
+          prev.forEach((id) => {
+            if (validIds.has(id)) next.add(id);
+          });
+          return next.size === prev.size ? prev : next;
+        });
+      }
     } catch (err: any) {
       if (err.name === 'AbortError') return;
       setError(err.message || 'Error loading images');
       setImages([]);
       setTotalImages(0);
+      setSelectedImageIds(new Set());
     } finally {
       setLoading(false);
     }
@@ -226,11 +246,13 @@ export function useGallery() {
       }
       return next;
     });
+    setSelectedImageIds(new Set());
     setCurrentPage(1);
   }, []);
 
   const clearTagFilters = useCallback(() => {
     setSelectedTags(new Set());
+    setSelectedImageIds(new Set());
     setSearchQuery('');
     setCurrentPage(1);
   }, []);
@@ -264,6 +286,11 @@ export function useGallery() {
 
   const deselectAllOnPage = useCallback(() => {
     setSelectedImageIds((prev) => {
+      const onPageIds = new Set(images.map((img) => img.id).filter((id): id is number => id !== null));
+      const hasOnPageSelected = Array.from(prev).some((id) => onPageIds.has(id));
+      if (!hasOnPageSelected) {
+        return new Set();
+      }
       const next = new Set(prev);
       images.forEach((img) => {
         if (img.id !== null) {
@@ -306,6 +333,7 @@ export function useGallery() {
         }
 
         const data = await resp.json();
+        setSelectedImageIds(new Set());
         await fetchGalleryTags();
         await fetchGalleryImages();
         return { success: true, modified: data.modified || 0 };
@@ -337,6 +365,7 @@ export function useGallery() {
         }
 
         const data = await resp.json();
+        setSelectedImageIds(new Set());
         await fetchGalleryTags();
         await fetchGalleryImages();
         return { success: true, modified: data.modified || 0 };
@@ -526,11 +555,13 @@ export function useGallery() {
   // Setters with pagination reset when filtering
   const handleSetCurrentFolder = useCallback((folder: string) => {
     setCurrentFolder(folder);
+    setSelectedImageIds(new Set());
     setCurrentPage(1);
   }, []);
 
   const handleSetSearchQuery = useCallback((query: string) => {
     setSearchQuery(query);
+    setSelectedImageIds(new Set());
     setCurrentPage(1);
   }, []);
 

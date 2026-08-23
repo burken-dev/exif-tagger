@@ -58,7 +58,7 @@ def scan_images(
 
     for dirpath, _dirnames, filenames in sorted(root.walk()):
         if is_cancelled and is_cancelled():
-            logger.info("Scan cancelled after finding %d images", len(image_paths))
+            logger.debug("Scan cancelled after finding %d images", len(image_paths))
             break
 
         current_dir = Path(dirpath)
@@ -72,7 +72,7 @@ def scan_images(
 
         for filename in sorted(filenames):
             if is_cancelled and is_cancelled():
-                logger.info("Scan cancelled after finding %d images", len(image_paths))
+                logger.debug("Scan cancelled after finding %d images", len(image_paths))
                 break
 
             file_path = current_dir / filename
@@ -96,5 +96,5 @@ def scan_images(
     # Sort for deterministic order
     image_paths.sort()
 
-    logger.info("Found %d images in %s", len(image_paths), root)
+    logger.debug("Found %d images in %s", len(image_paths), root)
     return image_paths

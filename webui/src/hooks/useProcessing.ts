@@ -33,6 +33,7 @@ export function useProcessing() {
 
   const lastProcessedLogIdRef = useRef<number>(0);
   const pollTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const wasRunningRef = useRef<boolean>(false);
 
   // Fetch root_directory from config
   useEffect(() => {
@@ -76,6 +77,8 @@ export function useProcessing() {
           setTotalCount(data.total);
           setProcessedCount(0);
           setProgressPct(0);
+          setSummary(null);
+          setStatusText('Idle');
         }
       })
       .catch(() => {});
@@ -90,33 +93,38 @@ export function useProcessing() {
       if (!resp.ok) return;
       const data: ProcessingStatus = await resp.json();
 
-      let runningState = false;
-      if (data.running) {
-        runningState = true;
+      const runningState = Boolean(data.running);
+      const prevWasRunning = wasRunningRef.current;
+      wasRunningRef.current = runningState;
+
+      if (runningState) {
         setIsRunning(true);
         setStatusText('Running');
+        setSummary(data.summary || null);
+        setProcessedCount(data.processed || 0);
+        setTotalCount(data.total || 0);
+        setProgressPct(data.progressPct || 0);
       } else if (data.stopRequested) {
-        runningState = false;
         setIsRunning(false);
         setStatusText('Stopping...');
       } else {
-        runningState = false;
         setIsRunning(false);
-        const hasFailures =
-          data.summary && (data.summary.failed > 0 || (data.summary.errors && data.summary.errors.length > 0));
-        if (hasFailures) {
-          setStatusText('Completed with errors');
-        } else if (data.summary) {
-          setStatusText('Completed');
-        } else {
-          setStatusText('Idle');
+        if (prevWasRunning) {
+          const hasFailures =
+            data.summary && (data.summary.failed > 0 || (data.summary.errors && data.summary.errors.length > 0));
+          if (hasFailures) {
+            setStatusText('Completed with errors');
+          } else if (data.summary) {
+            setStatusText('Completed');
+          } else {
+            setStatusText('Idle');
+          }
+          setSummary(data.summary || null);
+          setProcessedCount(data.processed || 0);
+          setTotalCount(data.total || 0);
+          setProgressPct(data.progressPct || 0);
         }
       }
-
-      setSummary(data.summary || null);
-      setProcessedCount(data.processed || 0);
-      setTotalCount(data.total || 0);
-      setProgressPct(data.progressPct || 0);
 
       // Append new logs sequentially
       if (data.logs && Array.isArray(data.logs)) {
@@ -188,6 +196,8 @@ export function useProcessing() {
           setProcessedCount(0);
           setTotalCount(0);
           setProgressPct(0);
+          setSummary(null);
+          wasRunningRef.current = true;
           setIsRunning(true);
           setStatusText('Running');
           setLogs([{ id: 0, text: 'Session started.', type: 'info' }]);

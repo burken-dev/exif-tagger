@@ -287,6 +287,7 @@ class PipelineEngine:
             effective_level = (
                 logging.DEBUG if self.verbose else getattr(logging, str(config_log_level).upper(), logging.INFO)
             )
+            logger.setLevel(effective_level)
             state_handler = StateLoggingHandler(self.state)
             state_handler.setLevel(effective_level)
             logger.addHandler(state_handler)
@@ -442,12 +443,62 @@ class PipelineEngine:
                     finally:
                         conn.close()
 
+                    # 1. Identify which tags exceeded threshold in this response
+                    matched_in_response = []
+                    for tr in response.results:
+                        t_name = tr.tag_name.lower()
+                        tag_def = config.tags.get(t_name)
+                        if tag_def is not None and tr.score >= tag_def.threshold:
+                            matched_in_response.append(tr)
+
+                    # 2. Check hallucination overflow guardrail
+                    guardrail_cfg = getattr(config, "guardrails", None)
+                    max_matched = guardrail_cfg.max_matched_tags if guardrail_cfg else 2
+                    guardrail_enabled = guardrail_cfg.enabled if guardrail_cfg else True
+                    on_overflow = (guardrail_cfg.on_overflow if guardrail_cfg else "suppress").lower()
+
+                    if guardrail_enabled and len(matched_in_response) > max_matched:
+                        matched_names = [tr.tag_name for tr in matched_in_response]
+                        if on_overflow == "suppress":
+                            logger.warning(
+                                "⚠️ Hallucination guardrail triggered on %s: %d tags matched (%s > max %d). Suppressing EXIF write.",
+                                img_path.name,
+                                len(matched_in_response),
+                                matched_names,
+                                max_matched,
+                            )
+                            tags_to_apply = set()
+                        elif on_overflow == "top_k":
+                            sorted_by_score = sorted(matched_in_response, key=lambda x: x.score, reverse=True)
+                            kept = sorted_by_score[:max_matched]
+                            tags_to_apply = {tr.tag_name.lower() for tr in kept}
+                            logger.warning(
+                                "⚠️ Hallucination guardrail triggered on %s: %d tags matched (%s > max %d). Keeping top %d by score: %s.",
+                                img_path.name,
+                                len(matched_in_response),
+                                matched_names,
+                                max_matched,
+                                max_matched,
+                                [tr.tag_name for tr in kept],
+                            )
+                        else:  # "warn"
+                            logger.warning(
+                                "⚠️ Hallucination guardrail warning on %s: %d tags matched (%s > max %d).",
+                                img_path.name,
+                                len(matched_in_response),
+                                matched_names,
+                                max_matched,
+                            )
+                            tags_to_apply = {tr.tag_name.lower() for tr in matched_in_response}
+                    else:
+                        tags_to_apply = {tr.tag_name.lower() for tr in matched_in_response}
+
                     newly_matched = False
                     for tr in response.results:
                         t_name = tr.tag_name.lower()
                         tag_def = config.tags.get(t_name)
                         desc_hash = tag_hashes.get(t_name, "")
-                        is_match = (tag_def is not None) and (tr.score >= tag_def.threshold)
+                        is_match = t_name in tags_to_apply
 
                         status_str = "matched" if is_match else "not_matched"
 

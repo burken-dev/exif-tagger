@@ -290,6 +290,8 @@ class TestPipelineEngineIntegration:
             def validate_exclude_patterns(self):
                 pass
 
+        db_path = tmp_path / "test.db"
+
         with patch("exif_tagger.config.load_config", return_value=MockConfig()):
             with patch("exif_tagger.image_scanner.scan_images", return_value=created_paths):
                 with patch("exif_tagger.config.get_resume_info", return_value=None):
@@ -298,9 +300,10 @@ class TestPipelineEngineIntegration:
                             with patch("exif_tagger.exif_writer.set_xptags", side_effect=fake_exif):
                                 with patch("exif_tagger.config.save_checkpoint"):
                                     with patch("exif_tagger.db.update_image_in_db_from_file"):
-                                        engine = PipelineEngine(config_path="config.yaml")
-                                        summary = engine.start_session(max_images=max_images)
-                                        return engine, summary
+                                        with patch("exif_tagger.db.get_db_path", return_value=db_path):
+                                            engine = PipelineEngine(config_path="config.yaml")
+                                            summary = engine.start_session(max_images=max_images)
+                                            return engine, summary
 
     def test_start_session_processes_all_images(self, tmp_path):
         """start_session should process all images and return a summary."""
@@ -364,12 +367,13 @@ class TestPipelineEngineIntegration:
 
         with patch("exif_tagger.config.load_config", return_value=MockConfig()):
             with patch("exif_tagger.ai_client.setup_secure_logging"):
-                with patch("exif_tagger.ai_client.tag_image_with_ai", return_value=mock_response):
-                    with patch("exif_tagger.db.get_db_path", return_value=db_path):
-                        from exif_tagger.main import PipelineEngine
+                with patch("exif_tagger.image_scanner.scan_images", return_value=[img1_path]):
+                    with patch("exif_tagger.ai_client.tag_image_with_ai", return_value=mock_response):
+                        with patch("exif_tagger.db.get_db_path", return_value=db_path):
+                            from exif_tagger.main import PipelineEngine
 
-                        engine = PipelineEngine(config_path="config.yaml")
-                        summary = engine.start_session(root_directory=str(images_dir))
+                            engine = PipelineEngine(config_path="config.yaml")
+                            summary = engine.start_session(root_directory=str(images_dir))
 
         images, total = get_gallery_images(db_path=db_path)
         assert total == 1
@@ -414,20 +418,148 @@ class TestPipelineEngineIntegration:
 
         with patch("exif_tagger.config.load_config", return_value=MockConfig()):
             with patch("exif_tagger.ai_client.setup_secure_logging"):
-                with patch("exif_tagger.ai_client.tag_image_with_ai", return_value=mock_response):
-                    with patch("exif_tagger.db.get_db_path", return_value=db_path):
-                        from exif_tagger.main import PipelineEngine
+                with patch("exif_tagger.image_scanner.scan_images", return_value=[img1_path, img2_path]):
+                    with patch("exif_tagger.ai_client.tag_image_with_ai", return_value=mock_response):
+                        with patch("exif_tagger.db.get_db_path", return_value=db_path):
+                            from exif_tagger.main import PipelineEngine
 
-                        engine = PipelineEngine(config_path="config.yaml")
-                        # Process with max_images=1 out of 2 found
-                        summary = engine.start_session(root_directory=str(images_dir), max_images=1)
+                            engine = PipelineEngine(config_path="config.yaml")
+                            # Process with max_images=1 out of 2 found
+                            summary = engine.start_session(root_directory=str(images_dir), max_images=1)
 
-                        logs = [l["text"] for l in engine.state.get_logs()]
-                        assert any("Found 1 images in processing plan (2 total images in folder)." in l for l in logs)
-                        assert summary["total_images_found"] == 2
-                        assert summary["total_processed"] == 1
-                        assert engine.state.total == 1
+                            logs = [l["text"] for l in engine.state.get_logs()]
+                            assert any("Found 1 images in processing plan (2 total images in folder)." in l for l in logs)
+                            assert summary["total_images_found"] == 2
+                            assert summary["total_processed"] == 1
+                            assert engine.state.total == 1
 
+    def test_guardrail_suppress_action_when_overflow(self, tmp_path):
+        """When matches exceed max_matched_tags, 'suppress' should discard all matches and avoid writing tags."""
+        from unittest.mock import MagicMock, patch
+
+        from PIL import Image as PILImage
+
+        from exif_tagger.db import get_gallery_images
+        from exif_tagger.models.schema import GuardrailConfig, TagResult
+
+        images_dir = tmp_path / "guardrail_suppress_images"
+        images_dir.mkdir(exist_ok=True)
+        img_path = images_dir / "hallucinated.jpg"
+        PILImage.new("RGB", (50, 50), color="red").save(img_path)
+
+        db_path = tmp_path / "guardrail1.db"
+
+        # Model returns 4 matched tags
+        mock_response = MagicMock()
+        mock_response.results = [
+            TagResult(tag_name="tag1", score=0.9),
+            TagResult(tag_name="tag2", score=0.88),
+            TagResult(tag_name="tag3", score=0.85),
+            TagResult(tag_name="tag4", score=0.82),
+        ]
+
+        class MockTagDef:
+            description = "tag"
+            threshold = 0.7
+
+        class MockConfig:
+            root_directory: str = str(images_dir)
+            tags: dict[str, MagicMock] = {
+                "tag1": MockTagDef(),
+                "tag2": MockTagDef(),
+                "tag3": MockTagDef(),
+                "tag4": MockTagDef(),
+            }
+            exclude_patterns: list | None = None
+            ai_model: str = "test-model"
+            max_image_dimension: int = 1024
+            guardrails: GuardrailConfig = GuardrailConfig(enabled=True, max_matched_tags=2, on_overflow="suppress")
+
+            def validate(self):
+                pass
+
+            def validate_exclude_patterns(self):
+                pass
+
+        with patch("exif_tagger.config.load_config", return_value=MockConfig()):
+            with patch("exif_tagger.ai_client.setup_secure_logging"):
+                with patch("exif_tagger.image_scanner.scan_images", return_value=[img_path]):
+                    with patch("exif_tagger.ai_client.tag_image_with_ai", return_value=mock_response):
+                        with patch("exif_tagger.db.get_db_path", return_value=db_path):
+                            from exif_tagger.main import PipelineEngine
+
+                            engine = PipelineEngine(config_path="config.yaml")
+                            summary = engine.start_session(root_directory=str(images_dir))
+
+                            images, total = get_gallery_images(db_path=db_path)
+                            assert total == 1
+                            # All tags should be suppressed!
+                            assert images[0]["tags"] == []
+
+                            logs = [l["text"] for l in engine.state.get_logs()]
+                            assert any("Hallucination guardrail triggered" in l for l in logs)
+
+    def test_guardrail_top_k_action_when_overflow(self, tmp_path):
+        """When matches exceed max_matched_tags, 'top_k' should retain only the top N highest scoring tags."""
+        from unittest.mock import MagicMock, patch
+
+        from PIL import Image as PILImage
+
+        from exif_tagger.db import get_gallery_images
+        from exif_tagger.models.schema import GuardrailConfig, TagResult
+
+        images_dir = tmp_path / "guardrail_topk_images"
+        images_dir.mkdir(exist_ok=True)
+        img_path = images_dir / "overflow.jpg"
+        PILImage.new("RGB", (50, 50), color="yellow").save(img_path)
+
+        db_path = tmp_path / "guardrail2.db"
+
+        # Model returns 3 matched tags with distinct scores
+        mock_response = MagicMock()
+        mock_response.results = [
+            TagResult(tag_name="highest", score=0.98),
+            TagResult(tag_name="middle", score=0.85),
+            TagResult(tag_name="lowest", score=0.75),
+        ]
+
+        class MockTagDef:
+            description = "tag"
+            threshold = 0.7
+
+        class MockConfig:
+            root_directory: str = str(images_dir)
+            tags: dict[str, MagicMock] = {
+                "highest": MockTagDef(),
+                "middle": MockTagDef(),
+                "lowest": MockTagDef(),
+            }
+            exclude_patterns: list | None = None
+            ai_model: str = "test-model"
+            max_image_dimension: int = 1024
+            guardrails: GuardrailConfig = GuardrailConfig(enabled=True, max_matched_tags=2, on_overflow="top_k")
+
+            def validate(self):
+                pass
+
+            def validate_exclude_patterns(self):
+                pass
+
+        with patch("exif_tagger.config.load_config", return_value=MockConfig()):
+            with patch("exif_tagger.ai_client.setup_secure_logging"):
+                with patch("exif_tagger.image_scanner.scan_images", return_value=[img_path]):
+                    with patch("exif_tagger.ai_client.tag_image_with_ai", return_value=mock_response):
+                        with patch("exif_tagger.db.get_db_path", return_value=db_path):
+                            from exif_tagger.main import PipelineEngine
+
+                            engine = PipelineEngine(config_path="config.yaml")
+                            summary = engine.start_session(root_directory=str(images_dir))
+
+                            images, total = get_gallery_images(db_path=db_path)
+                            assert total == 1
+                            # Only top 2 tags should be kept
+                            assert set(images[0]["tags"]) == {"highest", "middle"}
+                            assert "lowest" not in images[0]["tags"]
 
 
 class TestRunFunction:

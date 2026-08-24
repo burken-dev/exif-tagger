@@ -65,6 +65,25 @@ def test_processing_browse_button_present(browser_page: Page):
     assert btn.count() > 0, "Browse button should be present in Session Control"
 
 
+def test_processing_action_buttons_present(browser_page: Page):
+    """Processing tab renders Start Processing enabled and Stop Processing disabled when idle."""
+    start_btn = browser_page.locator("button").filter(has_text="Start Processing")
+    assert start_btn.count() > 0, "Start Processing button should be present"
+    assert start_btn.first.is_visible()
+    assert start_btn.first.is_enabled()
+
+    stop_btn = browser_page.locator("button").filter(has_text="Stop Processing")
+    assert stop_btn.count() > 0, "Stop Processing button should be present"
+    assert stop_btn.first.is_visible()
+    assert stop_btn.first.is_disabled()
+
+    pause_btn = browser_page.locator("button").filter(has_text="Pause Processing")
+    assert pause_btn.count() == 0, "Pause Processing button should not be present when idle"
+
+    resume_btn = browser_page.locator("button").filter(has_text="Resume Processing")
+    assert resume_btn.count() == 0, "Resume Processing button should not be present when idle"
+
+
 def test_processing_start_button_enabled(browser_page: Page):
     """Processing tab renders the Start Processing button enabled when idle."""
     btn = browser_page.locator("button").filter(has_text="Start Processing")
@@ -79,6 +98,187 @@ def test_processing_stop_button_disabled(browser_page: Page):
     assert btn.count() > 0, "Stop Processing button should be present"
     disabled = btn.first.get_attribute("disabled")
     assert disabled is not None, "Stop Processing button should be disabled when idle"
+
+
+def test_processing_running_state_ui(browser_page: Page):
+    """When processing is running, Pause is enabled, Stop is enabled, inputs are locked."""
+    import json
+
+    status_payload = {
+        "running": True,
+        "paused": False,
+        "processed": 3,
+        "total": 10,
+        "currentImage": "image_003.jpg",
+        "progressPct": 30.0,
+        "stopRequested": False,
+        "logs": [],
+        "summary": None,
+    }
+
+    browser_page.route(
+        "**/api/status",
+        lambda route: route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps(status_payload),
+        ),
+    )
+
+    browser_page.reload(wait_until="networkidle")
+
+    # Verify action buttons
+    pause_btn = browser_page.locator("button").filter(has_text="Pause Processing")
+    pause_btn.wait_for(state="visible")
+    assert pause_btn.is_enabled()
+
+    stop_btn = browser_page.locator("button").filter(has_text="Stop Processing")
+    assert stop_btn.is_visible()
+    assert stop_btn.is_enabled()
+
+    start_btn = browser_page.locator("button").filter(has_text="Start Processing")
+    assert start_btn.count() == 0
+
+    resume_btn = browser_page.locator("button").filter(has_text="Resume Processing")
+    assert resume_btn.count() == 0
+
+    # Verify directory locking & input disabling
+    folder_input = browser_page.locator("#folderPath")
+    assert folder_input.is_disabled()
+
+    browse_btn = browser_page.locator("button").filter(has_text="Browse")
+    assert browse_btn.is_disabled()
+
+    max_images_input = browser_page.locator("#maxImages")
+    assert max_images_input.is_disabled()
+
+    screenshot(browser_page, "tab_processing_running_state")
+
+
+def test_processing_paused_state_ui(browser_page: Page):
+    """When processing is paused, Resume is enabled, Stop is enabled, inputs remain locked."""
+    import json
+
+    status_payload = {
+        "running": True,
+        "paused": True,
+        "processed": 5,
+        "total": 10,
+        "currentImage": "image_005.jpg",
+        "progressPct": 50.0,
+        "stopRequested": False,
+        "logs": [],
+        "summary": None,
+    }
+
+    browser_page.route(
+        "**/api/status",
+        lambda route: route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps(status_payload),
+        ),
+    )
+
+    browser_page.reload(wait_until="networkidle")
+
+    # Verify action buttons
+    resume_btn = browser_page.locator("button").filter(has_text="Resume Processing")
+    resume_btn.wait_for(state="visible")
+    assert resume_btn.is_enabled()
+
+    stop_btn = browser_page.locator("button").filter(has_text="Stop Processing")
+    assert stop_btn.is_visible()
+    assert stop_btn.is_enabled()
+
+    start_btn = browser_page.locator("button").filter(has_text="Start Processing")
+    assert start_btn.count() == 0
+
+    pause_btn = browser_page.locator("button").filter(has_text="Pause Processing")
+    assert pause_btn.count() == 0
+
+    # Verify directory locking & input disabling
+    folder_input = browser_page.locator("#folderPath")
+    assert folder_input.is_disabled()
+
+    browse_btn = browser_page.locator("button").filter(has_text="Browse")
+    assert browse_btn.is_disabled()
+
+    max_images_input = browser_page.locator("#maxImages")
+    assert max_images_input.is_disabled()
+
+    # Verify status badge shows Paused
+    content = browser_page.content()
+    assert "Paused" in content
+
+    screenshot(browser_page, "tab_processing_paused_state")
+
+
+def test_processing_pause_and_resume_button_actions(browser_page: Page):
+    """Clicking Pause Processing calls /api/pause, and clicking Resume Processing calls /api/resume."""
+    import json
+
+    pause_called = []
+    resume_called = []
+
+    current_status = {
+        "running": True,
+        "paused": False,
+        "processed": 2,
+        "total": 10,
+        "currentImage": "image_002.jpg",
+        "progressPct": 20.0,
+        "stopRequested": False,
+        "logs": [],
+        "summary": None,
+    }
+
+    def handle_status(route):
+        route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps(current_status),
+        )
+
+    def handle_pause(route):
+        pause_called.append(True)
+        current_status["paused"] = True
+        route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps({"status": "paused"}),
+        )
+
+    def handle_resume(route):
+        resume_called.append(True)
+        current_status["paused"] = False
+        route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps({"status": "resumed"}),
+        )
+
+    browser_page.route("**/api/status", handle_status)
+    browser_page.route("**/api/pause", handle_pause)
+    browser_page.route("**/api/resume", handle_resume)
+
+    browser_page.reload(wait_until="networkidle")
+
+    # Click Pause
+    pause_btn = browser_page.locator("button").filter(has_text="Pause Processing")
+    pause_btn.wait_for(state="visible")
+    pause_btn.click()
+
+    browser_page.wait_for_timeout(300)
+    assert len(pause_called) == 1, "Expected /api/pause to be called"
+
+    # Click Resume
+    resume_btn = browser_page.locator("button").filter(has_text="Resume Processing")
+    resume_btn.wait_for(state="visible")
+    resume_btn.click()
+
+    browser_page.wait_for_timeout(300)
+    assert len(resume_called) == 1, "Expected /api/resume to be called"
 
 
 # ---------------------------------------------------------------------------

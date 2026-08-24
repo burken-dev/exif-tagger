@@ -301,6 +301,7 @@ class PipelineEngine:
         self.verbose = verbose
         self.state = ProcessingState()
         self._config = None
+        self._live_tag_hashes = None
 
     def _load_config(self):
         from exif_tagger.config import load_config
@@ -326,6 +327,7 @@ class PipelineEngine:
         base_gallery_root = Path(config.root_directory).resolve()
         base_gallery_root, target_subfolder = validate_and_resolve_subfolder(root_directory, base_gallery_root)
         config.root_directory = str(base_gallery_root)
+        self._config = config
 
         try:
             config_log_level = getattr(config, "log_level", "INFO")
@@ -391,6 +393,7 @@ class PipelineEngine:
 
             # 3. Compute tag description hashes
             tag_hashes = {name: compute_tag_hash(tag_def.description) for name, tag_def in config.tags.items()}
+            self._live_tag_hashes = tag_hashes
 
             # 4. Perform zero-cost local threshold re-evaluation
             local_stats = evaluate_thresholds_locally(
@@ -458,6 +461,7 @@ class PipelineEngine:
             def process_image(img_path: Path) -> None:
                 nonlocal successfully_tagged, failed_count
 
+                self.state.wait_if_paused()
                 if self.state.stop_requested:
                     return
 
@@ -471,16 +475,22 @@ class PipelineEngine:
 
                 img_id = img_cand_list[0]["image_id"]
                 img_mtime = img_cand_list[0]["image_mtime"]
+
+                current_config = self._config or config
+                current_tag_hashes = getattr(self, "_live_tag_hashes", tag_hashes) or tag_hashes
+
                 target_tags = {
-                    c["tag_name"]: config.tags[c["tag_name"]] for c in img_cand_list if c["tag_name"] in config.tags
+                    c["tag_name"]: current_config.tags[c["tag_name"]]
+                    for c in img_cand_list
+                    if c["tag_name"] in current_config.tags
                 }
 
                 try:
                     response = tag_image_with_ai(
-                        config.ai_model,
+                        current_config.ai_model,
                         img_path,
                         target_tags,
-                        max_dim=config.max_image_dimension,
+                        max_dim=current_config.max_image_dimension,
                     )
 
                     conn = get_connection()
@@ -496,12 +506,12 @@ class PipelineEngine:
                     matched_in_response = []
                     for tr in response.results:
                         t_name = tr.tag_name.lower()
-                        tag_def = config.tags.get(t_name)
+                        tag_def = current_config.tags.get(t_name)
                         if tag_def is not None and tr.score >= tag_def.threshold:
                             matched_in_response.append(tr)
 
                     # 2. Check hallucination overflow guardrail
-                    guardrail_cfg = getattr(config, "guardrails", None)
+                    guardrail_cfg = getattr(current_config, "guardrails", None)
                     max_matched = guardrail_cfg.max_matched_tags if guardrail_cfg else 2
                     guardrail_enabled = guardrail_cfg.enabled if guardrail_cfg else True
                     on_overflow = (guardrail_cfg.on_overflow if guardrail_cfg else "suppress").lower()
@@ -545,8 +555,8 @@ class PipelineEngine:
                     newly_matched = False
                     for tr in response.results:
                         t_name = tr.tag_name.lower()
-                        tag_def = config.tags.get(t_name)
-                        desc_hash = tag_hashes.get(t_name, "")
+                        tag_def = current_config.tags.get(t_name)
+                        desc_hash = current_tag_hashes.get(t_name, "")
                         is_match = t_name in tags_to_apply
 
                         status_str = "matched" if is_match else "not_matched"
@@ -558,7 +568,7 @@ class PipelineEngine:
                             status=status_str,
                             score=tr.score,
                             reason=tr.reason,
-                            model_name=getattr(config.ai_model, "model_name", "vision_model"),
+                            model_name=getattr(current_config.ai_model, "model_name", "vision_model"),
                             image_mtime=img_mtime,
                         )
 
@@ -653,6 +663,40 @@ class PipelineEngine:
             if state_handler:
                 logger.removeHandler(state_handler)
 
+    def pause(self) -> dict:
+        """Pause current processing session."""
+        self.state.set_paused()
+        return {
+            "status": "paused",
+            "processed": self.state.processed,
+        }
+
+    def resume(self) -> dict:
+        """Resume current processing session with reloaded configuration."""
+        from exif_tagger.config import compute_tag_hash
+        from exif_tagger.db import evaluate_thresholds_locally
+
+        config = self._load_config()
+        self._live_tag_hashes = {
+            name: compute_tag_hash(tag_def.description) for name, tag_def in config.tags.items()
+        }
+
+        # Zero-cost local threshold re-evaluation with updated tags/thresholds
+        try:
+            evaluate_thresholds_locally(
+                root_directory=config.root_directory,
+                active_tags=config.tags,
+                tag_hashes=self._live_tag_hashes,
+            )
+        except Exception as e:
+            logging.getLogger("exif_tagger").warning("Local threshold re-evaluation failed on resume: %s", e)
+
+        self.state.set_resumed()
+        return {
+            "status": "resumed",
+            "processed": self.state.processed,
+        }
+
     def stop(self) -> dict:
         """Request graceful stop of current session."""
         self.state.set_stop_requested()
@@ -665,17 +709,7 @@ class PipelineEngine:
 
     def get_status(self) -> dict:
         """Get current processing state."""
-        s = self.state
-        return {
-            "running": s.running,
-            "paused": s.paused,
-            "processed": s.processed,
-            "total": s.total,
-            "currentImage": s.current_image,
-            "progressPct": s.progress_pct,
-            "stopRequested": s.stop_requested,
-            "logs": s.get_logs(),
-        }
+        return self.state.get_status()
 
 
 def run(

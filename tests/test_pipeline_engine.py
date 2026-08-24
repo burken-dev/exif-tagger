@@ -353,6 +353,181 @@ class TestPipelineEngineBasicAPIs:
         assert "processed" in result
 
 
+class TestPipelineEnginePauseResume:
+    """Tests for PipelineEngine pause, resume, and dynamic config reloading."""
+
+    def test_pipeline_engine_pause_resume_hot_reload(self, tmp_path):
+        import yaml
+        from exif_tagger.main import PipelineEngine
+
+        cfg_file = tmp_path / "config.yaml"
+        initial_cfg = {
+            "root_directory": str(tmp_path),
+            "ai_model": {
+                "base_url": "https://api.openai.com/v1",
+                "model_name": "model-v1",
+                "api_key": "test",
+            },
+            "tags": {
+                "tag1": {"description": "Initial tag 1", "threshold": 0.7}
+            },
+        }
+        cfg_file.write_text(yaml.safe_dump(initial_cfg))
+
+        engine = PipelineEngine(config_path=str(cfg_file))
+        engine.state.start(5)
+
+        # Pause
+        res = engine.pause()
+        assert res["status"] == "paused"
+        assert res["processed"] == 0
+        assert engine.state.paused is True
+
+        # Modify config on disk while paused
+        updated_cfg = {
+            "root_directory": str(tmp_path),
+            "ai_model": {
+                "base_url": "https://api.openai.com/v1",
+                "model_name": "model-v2",
+                "api_key": "test",
+            },
+            "tags": {
+                "tag1": {"description": "Updated tag 1", "threshold": 0.8},
+                "tag2": {"description": "New tag 2", "threshold": 0.75},
+            },
+        }
+        cfg_file.write_text(yaml.safe_dump(updated_cfg))
+
+        # Resume
+        res_resume = engine.resume()
+        assert res_resume["status"] == "resumed"
+        assert res_resume["processed"] == 0
+        assert engine.state.paused is False
+        assert engine._config.ai_model.model_name == "model-v2"
+        assert "tag2" in engine._config.tags
+        assert "tag2" in engine._live_tag_hashes
+
+    def test_pipeline_engine_pause_returns_expected_dict(self):
+        from exif_tagger.main import PipelineEngine
+
+        engine = PipelineEngine(config_path="config.yaml")
+        engine.state.start(10)
+        engine.state.update_progress("a.jpg")
+
+        res = engine.pause()
+        assert res == {"status": "paused", "processed": 1}
+        assert engine.state.paused is True
+
+    def test_pipeline_engine_resume_calls_evaluate_thresholds_locally(self, tmp_path):
+        from unittest.mock import patch
+        import yaml
+        from exif_tagger.main import PipelineEngine
+
+        cfg_file = tmp_path / "config.yaml"
+        cfg = {
+            "root_directory": str(tmp_path),
+            "model": {
+                "base_url": "https://api.openai.com/v1",
+                "model_name": "model-v1",
+                "api_key": "test",
+            },
+            "tags": {"tag1": {"description": "tag", "threshold": 0.5}},
+        }
+        cfg_file.write_text(yaml.safe_dump(cfg))
+
+        engine = PipelineEngine(config_path=str(cfg_file))
+        engine.state.start(10)
+        engine.pause()
+
+        with patch("exif_tagger.db.evaluate_thresholds_locally") as mock_eval:
+            res = engine.resume()
+            assert res == {"status": "resumed", "processed": 0}
+            assert mock_eval.called
+            _, kwargs = mock_eval.call_args
+            assert "active_tags" in kwargs
+            assert "tag_hashes" in kwargs
+            assert "tag1" in kwargs["tag_hashes"]
+
+    def test_pipeline_engine_get_status_delegates_to_state(self):
+        from exif_tagger.main import PipelineEngine
+
+        engine = PipelineEngine(config_path="config.yaml")
+        engine.state.start(10)
+        engine.state.set_paused()
+        status = engine.get_status()
+        assert status == engine.state.get_status()
+        assert status["paused"] is True
+        assert status["running"] is True
+
+    def test_pipeline_engine_worker_suspends_and_resumes(self, tmp_path):
+        import time
+        import threading
+        from unittest.mock import MagicMock, patch
+        from PIL import Image
+        import yaml
+        from exif_tagger.main import PipelineEngine
+        from exif_tagger.models.schema import TagResult
+
+        images_dir = tmp_path / "images"
+        images_dir.mkdir(exist_ok=True)
+        img1 = images_dir / "test1.jpg"
+        img2 = images_dir / "test2.jpg"
+        Image.new("RGB", (50, 50), color="blue").save(img1)
+        Image.new("RGB", (50, 50), color="green").save(img2)
+
+        cfg_file = tmp_path / "config.yaml"
+        cfg = {
+            "root_directory": str(images_dir),
+            "model": {
+                "base_url": "https://api.openai.com/v1",
+                "model_name": "model-v1",
+                "api_key": "test",
+                "concurrency": 1,
+            },
+            "tags": {"dog": {"description": "A dog", "threshold": 0.5}},
+        }
+        cfg_file.write_text(yaml.safe_dump(cfg))
+
+        engine = PipelineEngine(config_path=str(cfg_file))
+
+        ai_called_events = []
+        first_call_done = threading.Event()
+
+        def fake_tag_image(ai_model, path, target_tags, max_dim=None):
+            ai_called_events.append(path.name)
+            if len(ai_called_events) == 1:
+                # First image being processed: pause the engine!
+                engine.pause()
+                first_call_done.set()
+            return MagicMock(results=[TagResult(tag_name="dog", score=0.9)])
+
+        session_result = {}
+
+        def run_pipeline():
+            with patch("exif_tagger.ai_client.setup_secure_logging"):
+                with patch("exif_tagger.ai_client.tag_image_with_ai", side_effect=fake_tag_image):
+                    session_result["summary"] = engine.start_session(root_directory=str(images_dir))
+
+        t = threading.Thread(target=run_pipeline)
+        t.start()
+
+        # Wait until first image was processed and paused
+        assert first_call_done.wait(timeout=2.0)
+        time.sleep(0.1)
+
+        # Since concurrency=1 and engine is paused, second image should NOT have been sent to AI yet
+        assert engine.state.paused is True
+        assert len(ai_called_events) == 1
+
+        # Now resume
+        engine.resume()
+        t.join(timeout=3.0)
+
+        assert not t.is_alive()
+        assert len(ai_called_events) == 2
+        assert session_result["summary"]["successfully_tagged"] == 2
+
+
 class TestPipelineEngineIntegration:
     """End-to-end tests for PipelineEngine.start_session().
 

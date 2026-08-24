@@ -106,8 +106,32 @@ export const ConfigTab: React.FC = () => {
   // Advanced OpenAI API params
   const [advancedParams, setAdvancedParams] = useState<Record<string, any>>({});
   const [advancedEnabled, setAdvancedEnabled] = useState<Record<string, boolean>>({});
+  const [isSessionActive, setIsSessionActive] = useState<boolean>(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    let isSubscribed = true;
+    const checkStatus = async () => {
+      try {
+        const res = await fetch('/api/status');
+        if (res.ok) {
+          const data = await res.json();
+          if (isSubscribed) {
+            setIsSessionActive(Boolean(data.running));
+          }
+        }
+      } catch {
+        // ignore
+      }
+    };
+    checkStatus();
+    const interval = setInterval(checkStatus, 3000);
+    return () => {
+      isSubscribed = false;
+      clearInterval(interval);
+    };
+  }, []);
 
   useEffect(() => {
     if (config) {
@@ -334,10 +358,13 @@ export const ConfigTab: React.FC = () => {
                 setFormData((prev) => ({ ...prev, root_directory: e.target.value }))
               }
               placeholder="/data/images"
+              disabled={isSessionActive}
               className="font-mono text-sm"
             />
             <p className="text-xs text-muted-foreground">
-              Base path on server disk containing target image subfolders.
+              {isSessionActive
+                ? 'Root directory is locked while a processing session is active or paused.'
+                : 'Base path on server disk containing target image subfolders.'}
             </p>
           </div>
 

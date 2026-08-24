@@ -1,7 +1,7 @@
 import React from 'react';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Activity, CheckCircle2, AlertTriangle, Loader2 } from 'lucide-react';
+import { Activity, CheckCircle2, AlertTriangle, Loader2, Pause } from 'lucide-react';
 
 export interface ProgressCardProps {
   processedCount: number;
@@ -9,6 +9,7 @@ export interface ProgressCardProps {
   progressPct: number;
   statusText: string;
   isRunning: boolean;
+  isPaused?: boolean;
   summary?: { failed: number; errors?: any[] } | null;
 }
 
@@ -18,6 +19,7 @@ export const ProgressCard: React.FC<ProgressCardProps> = ({
   progressPct,
   statusText,
   isRunning,
+  isPaused = false,
   summary,
 }) => {
   const roundedPct = Math.min(100, Math.max(0, Math.round(progressPct || 0)));
@@ -33,8 +35,10 @@ export const ProgressCard: React.FC<ProgressCardProps> = ({
           <Badge
             variant="outline"
             className={`px-2.5 py-0.5 text-xs font-medium ${
-              isRunning
+              isRunning && !isPaused
                 ? 'bg-amber-500/10 text-amber-500 border-amber-500/30'
+                : isPaused
+                ? 'bg-amber-500/10 text-amber-400 border-amber-500/30'
                 : statusText === 'Completed'
                 ? 'bg-emerald-500/10 text-emerald-500 border-emerald-500/30'
                 : statusText === 'Completed with errors'
@@ -42,7 +46,8 @@ export const ProgressCard: React.FC<ProgressCardProps> = ({
                 : 'bg-slate-500/10 text-slate-400 border-slate-500/30'
             }`}
           >
-            {isRunning && <Loader2 className="w-3 h-3 mr-1 inline animate-spin" />}
+            {isRunning && !isPaused && <Loader2 className="w-3 h-3 mr-1 inline animate-spin" />}
+            {isPaused && <Pause className="w-3 h-3 mr-1 inline" />}
             {statusText}
           </Badge>
         </div>

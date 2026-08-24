@@ -2,7 +2,7 @@ import React from 'react';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { Folder, FolderOpen, Play, Square, Hash } from 'lucide-react';
+import { Folder, FolderOpen, Play, Pause, Square, Hash } from 'lucide-react';
 
 export interface SessionCardProps {
   rootDirectory?: string;
@@ -12,7 +12,10 @@ export interface SessionCardProps {
   maxImages: number | null;
   onMaxImagesChange: (max: number | null) => void;
   isRunning: boolean;
+  isPaused: boolean;
   onStart: () => void;
+  onPause: () => void;
+  onResume: () => void;
   onStop: () => void;
 }
 
@@ -24,13 +27,20 @@ export const SessionCard: React.FC<SessionCardProps> = ({
   maxImages,
   onMaxImagesChange,
   isRunning,
+  isPaused,
   onStart,
+  onPause,
+  onResume,
   onStop,
 }) => {
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!isRunning) {
       onStart();
+    } else if (isPaused) {
+      onResume();
+    } else {
+      onPause();
     }
   };
 
@@ -130,15 +140,36 @@ export const SessionCard: React.FC<SessionCardProps> = ({
           </div>
 
           <div className="flex items-center gap-3 pt-2">
-            <Button
-              type="submit"
-              variant="default"
-              disabled={isRunning}
-              className="flex items-center gap-2"
-            >
-              <Play className="w-4 h-4" />
-              Start Processing
-            </Button>
+            {!isRunning ? (
+              <Button
+                type="submit"
+                variant="default"
+                className="flex items-center gap-2"
+              >
+                <Play className="w-4 h-4" />
+                Start Processing
+              </Button>
+            ) : isPaused ? (
+              <Button
+                type="button"
+                variant="default"
+                onClick={onResume}
+                className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white"
+              >
+                <Play className="w-4 h-4" />
+                Resume Processing
+              </Button>
+            ) : (
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={onPause}
+                className="flex items-center gap-2 border border-amber-500/40 text-amber-500 hover:bg-amber-500/10"
+              >
+                <Pause className="w-4 h-4" />
+                Pause Processing
+              </Button>
+            )}
 
             <Button
               type="button"

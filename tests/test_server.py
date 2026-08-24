@@ -123,6 +123,74 @@ class TestApiStop:
             assert data["status"] == "stopped"
 
 
+class TestApiPauseResume:
+    def test_pause_no_running_session(self, client):
+        resp = client.post("/api/pause")
+        assert resp.status_code == 400
+        assert "No active processing session" in resp.json()["detail"]
+
+    def test_resume_no_running_session(self, client):
+        resp = client.post("/api/resume")
+        assert resp.status_code == 400
+        assert "No active processing session" in resp.json()["detail"]
+
+    def test_pause_and_resume_flow(self, client, monkeypatch):
+        from exif_tagger import server
+
+        engine = server._get_engine()
+        engine.state.start(10)
+
+        # First pause succeeds
+        resp = client.post("/api/pause")
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "paused"
+
+        # Status shows paused
+        s_resp = client.get("/api/status")
+        assert s_resp.status_code == 200
+        assert s_resp.json()["paused"] is True
+        assert s_resp.json()["running"] is True
+
+        # Second pause fails
+        resp2 = client.post("/api/pause")
+        assert resp2.status_code == 400
+
+        # Resume succeeds
+        resp_resume = client.post("/api/resume")
+        assert resp_resume.status_code == 200
+        assert resp_resume.json()["status"] == "resumed"
+
+        # Status shows not paused
+        s_resp2 = client.get("/api/status")
+        assert s_resp2.json()["paused"] is False
+
+        # Stop while running or paused works
+        resp_stop = client.post("/api/stop")
+        assert resp_stop.status_code == 200
+        assert resp_stop.json()["status"] == "stopped"
+
+    def test_resume_when_not_paused(self, client):
+        from exif_tagger import server
+
+        engine = server._get_engine()
+        engine.state.start(10)
+
+        resp = client.post("/api/resume")
+        assert resp.status_code == 400
+        assert "Processing session is not paused" in resp.json()["detail"]
+
+    def test_stop_when_paused(self, client):
+        from exif_tagger import server
+
+        engine = server._get_engine()
+        engine.state.start(10)
+        client.post("/api/pause")
+
+        resp = client.post("/api/stop")
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "stopped"
+
+
 class TestApiConfig:
     def test_get_config(self, client):
         with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:

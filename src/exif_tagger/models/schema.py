@@ -117,7 +117,7 @@ class GalleryIndexConfig(BaseModel):
 class Config(BaseModel):
     """Hela konfigurationen av exif-tagger."""
 
-    model_config = ConfigDict(populate_by_name=True)
+    model_config = ConfigDict(populate_by_name=True, extra="allow")
 
     root_directory: str = Field(
         default="/data/images",
@@ -172,8 +172,6 @@ class Config(BaseModel):
                 re.compile(pattern)
             except re.error as exc:
                 raise ValueError(f"Invalid regex pattern '{pattern}': {exc}") from exc
-
-    model_config = ConfigDict(extra="allow")
 
 
 # ---------------------------------------------------------------------------

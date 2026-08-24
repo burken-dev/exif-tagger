@@ -200,7 +200,6 @@ class TestProcessingState:
         assert state.paused is False
 
     def test_processing_state_wait_if_paused_unblocks_on_resume(self):
-        import time
         from exif_tagger.main import ProcessingState
 
         state = ProcessingState()
@@ -224,7 +223,6 @@ class TestProcessingState:
         t.join(timeout=1.0)
 
     def test_processing_state_wait_if_paused_unblocks_on_stop(self):
-        import time
         from exif_tagger.main import ProcessingState
 
         state = ProcessingState()
@@ -358,6 +356,7 @@ class TestPipelineEnginePauseResume:
 
     def test_pipeline_engine_pause_resume_hot_reload(self, tmp_path):
         import yaml
+
         from exif_tagger.main import PipelineEngine
 
         cfg_file = tmp_path / "config.yaml"
@@ -420,7 +419,9 @@ class TestPipelineEnginePauseResume:
 
     def test_pipeline_engine_resume_calls_evaluate_thresholds_locally(self, tmp_path):
         from unittest.mock import patch
+
         import yaml
+
         from exif_tagger.main import PipelineEngine
 
         cfg_file = tmp_path / "config.yaml"
@@ -460,11 +461,13 @@ class TestPipelineEnginePauseResume:
         assert status["running"] is True
 
     def test_pipeline_engine_worker_suspends_and_resumes(self, tmp_path):
-        import time
         import threading
+        import time
         from unittest.mock import MagicMock, patch
-        from PIL import Image
+
         import yaml
+        from PIL import Image
+
         from exif_tagger.main import PipelineEngine
         from exif_tagger.models.schema import TagResult
 

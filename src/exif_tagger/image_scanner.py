@@ -96,5 +96,4 @@ def scan_images(
     # Sort for deterministic order
     image_paths.sort()
 
-    logger.debug("Found %d images in %s", len(image_paths), root)
     return image_paths

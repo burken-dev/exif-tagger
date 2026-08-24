@@ -233,3 +233,48 @@ def test_pipeline_engine_start_session_scoping(tmp_path: Path, monkeypatch):
     with pytest.raises(ValueError) as exc_info:
         engine.start_session(root_directory="../../etc/passwd")
     assert "outside the root image directory" in str(exc_info.value)
+
+
+def test_subfolder_session_logs_do_not_contain_root_scan_count(tmp_path: Path, monkeypatch):
+    """When processing a subfolder with verbose=True, session logs should not log root scan count."""
+    gallery_dir = tmp_path / "gallery"
+    sub1 = gallery_dir / "folder1"
+    sub2 = gallery_dir / "folder2"
+
+    img1_path = sub1 / "image1.jpg"
+    img2_path = sub2 / "image2.jpg"
+
+    create_test_image(img1_path)
+    create_test_image(img2_path)
+
+    db_path = tmp_path / "test.db"
+    monkeypatch.setenv("EXIFTAGGER_DB_FILE", str(db_path))
+
+    sync_gallery_index(root_directory=gallery_dir, db_path=db_path)
+
+    config_file = tmp_path / "config.yaml"
+    config_file.write_text(
+        f"""
+root_directory: "{gallery_dir}"
+model:
+  base_url: "https://api.openai.com/v1"
+  model_name: "test-model"
+  api_key: "test-key"
+tags:
+  nature:
+    description: "nature scene"
+    threshold: 0.5
+"""
+    )
+
+    engine = PipelineEngine(config_path=str(config_file), verbose=True)
+
+    mock_res = TaggingResponse(results=[TagResult(tag_name="nature", score=0.9, reason="good")])
+    with patch("exif_tagger.ai_client.tag_image_with_ai", return_value=mock_res):
+        summary = engine.start_session(root_directory="folder1")
+
+    logs = [l["text"] for l in engine.state.get_logs()]
+    # Session logs must NOT contain "Found 2 images in ..." (the root scan count)
+    assert not any("Found 2 images in" in l for l in logs)
+    # Session logs MUST contain the processing plan for folder1 (1 image)
+    assert any("Found 1 images in processing plan (1 total images in folder)." in l for l in logs)

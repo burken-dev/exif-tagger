@@ -134,9 +134,25 @@ class TestApiPauseResume:
         assert resp.status_code == 400
         assert "No active processing session" in resp.json()["detail"]
 
-    def test_pause_and_resume_flow(self, client, monkeypatch):
+    def test_pause_and_resume_flow(self, client, tmp_path, monkeypatch):
+        import yaml
+
         from exif_tagger import server
 
+        cfg_file = tmp_path / "config.yaml"
+        cfg = {
+            "root_directory": str(tmp_path),
+            "ai_model": {
+                "base_url": "https://api.openai.com/v1",
+                "model_name": "test-model",
+                "api_key": "test",
+            },
+            "tags": {"tag1": {"description": "test", "threshold": 0.5}},
+        }
+        cfg_file.write_text(yaml.safe_dump(cfg))
+
+        monkeypatch.setattr(server, "CONFIG_PATH", str(cfg_file))
+        server._engine = None
         engine = server._get_engine()
         engine.state.start(10)
 
@@ -168,6 +184,8 @@ class TestApiPauseResume:
         resp_stop = client.post("/api/stop")
         assert resp_stop.status_code == 200
         assert resp_stop.json()["status"] == "stopped"
+
+        server._engine = None
 
     def test_resume_when_not_paused(self, client):
         from exif_tagger import server

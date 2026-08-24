@@ -153,6 +153,9 @@ class ProcessingState:
     def __init__(self):
         self._lock = threading.RLock()
         self._running = False
+        self._paused = False
+        self._pause_event = threading.Event()
+        self._pause_event.set()
         self._processed = 0
         self._total = 0
         self._current_image: str | None = None
@@ -165,6 +168,11 @@ class ProcessingState:
     def running(self) -> bool:
         with self._lock:
             return self._running
+
+    @property
+    def paused(self) -> bool:
+        with self._lock:
+            return self._paused
 
     @property
     def processed(self) -> int:
@@ -211,9 +219,32 @@ class ProcessingState:
         with self._lock:
             return list(self._log_entries)
 
+    def set_paused(self) -> None:
+        with self._lock:
+            if self._running and not self._paused:
+                self._paused = True
+                self._pause_event.clear()
+                self.add_log("Processing session paused.", "info")
+
+    def set_resumed(self) -> None:
+        with self._lock:
+            if self._paused:
+                self._paused = False
+                self._pause_event.set()
+                self.add_log("Processing session resumed.", "info")
+
+    def wait_if_paused(self) -> None:
+        while True:
+            with self._lock:
+                if not self._paused or self._stop_requested:
+                    return
+            self._pause_event.wait(timeout=0.2)
+
     def start(self, total_images: int) -> None:
         with self._lock:
             self._running = True
+            self._paused = False
+            self._pause_event.set()
             self._processed = 0
             self._total = total_images
             self._current_image = None
@@ -231,10 +262,14 @@ class ProcessingState:
     def set_stop_requested(self) -> None:
         with self._lock:
             self._stop_requested = True
+            self._paused = False
+            self._pause_event.set()
 
     def finish(self, summary: dict) -> None:
         with self._lock:
             self._running = False
+            self._paused = False
+            self._pause_event.set()
             self._current_image = None
             self._summary = summary
 
@@ -244,6 +279,20 @@ class ProcessingState:
             if self._total == 0:
                 return 0.0
             return round((self._processed / self._total) * 100, 1)
+
+    def get_status(self) -> dict:
+        """Get current processing state."""
+        with self._lock:
+            return {
+                "running": self._running,
+                "paused": self._paused,
+                "processed": self._processed,
+                "total": self._total,
+                "currentImage": self._current_image,
+                "progressPct": self.progress_pct,
+                "stopRequested": self._stop_requested,
+                "logs": list(self._log_entries),
+            }
 
 
 class PipelineEngine:
@@ -619,6 +668,7 @@ class PipelineEngine:
         s = self.state
         return {
             "running": s.running,
+            "paused": s.paused,
             "processed": s.processed,
             "total": s.total,
             "currentImage": s.current_image,

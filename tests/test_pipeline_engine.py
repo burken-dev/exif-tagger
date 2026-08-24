@@ -143,6 +143,111 @@ class TestProcessingState:
         assert logs[1]["text"] == "Message 2"
         assert logs[1]["level"] == "error"
 
+    def test_processing_state_pause_and_resume(self):
+        from exif_tagger.main import ProcessingState
+
+        state = ProcessingState()
+        assert state.paused is False
+        assert state.running is False
+
+        state.start(10)
+        assert state.running is True
+        assert state.paused is False
+
+        state.set_paused()
+        assert state.paused is True
+        assert state.running is True
+        status = state.get_status()
+        assert status["paused"] is True
+        assert any("paused" in log["text"].lower() for log in status["logs"])
+
+        state.set_resumed()
+        assert state.paused is False
+        assert state.running is True
+        status = state.get_status()
+        assert status["paused"] is False
+        assert any("resumed" in log["text"].lower() for log in status["logs"])
+
+    def test_processing_state_finish_clears_pause(self):
+        from exif_tagger.main import ProcessingState
+
+        state = ProcessingState()
+        state.start(5)
+        state.set_paused()
+        assert state.paused is True
+
+        state.finish({"total_processed": 0})
+        assert state.paused is False
+        assert state.running is False
+
+    def test_processing_state_stop_requested_clears_pause(self):
+        from exif_tagger.main import ProcessingState
+
+        state = ProcessingState()
+        state.start(5)
+        state.set_paused()
+        assert state.paused is True
+
+        state.set_stop_requested()
+        assert state.paused is False
+        assert state.stop_requested is True
+
+    def test_processing_state_pause_only_when_running(self):
+        from exif_tagger.main import ProcessingState
+
+        state = ProcessingState()
+        state.set_paused()
+        assert state.paused is False
+
+    def test_processing_state_wait_if_paused_unblocks_on_resume(self):
+        import time
+        from exif_tagger.main import ProcessingState
+
+        state = ProcessingState()
+        state.start(5)
+        state.set_paused()
+
+        unblocked = threading.Event()
+
+        def worker():
+            state.wait_if_paused()
+            unblocked.set()
+
+        t = threading.Thread(target=worker)
+        t.start()
+
+        # Should be blocked
+        assert not unblocked.wait(timeout=0.05)
+
+        state.set_resumed()
+        assert unblocked.wait(timeout=1.0)
+        t.join(timeout=1.0)
+
+    def test_processing_state_wait_if_paused_unblocks_on_stop(self):
+        import time
+        from exif_tagger.main import ProcessingState
+
+        state = ProcessingState()
+        state.start(5)
+        state.set_paused()
+
+        unblocked = threading.Event()
+
+        def worker():
+            state.wait_if_paused()
+            unblocked.set()
+
+        t = threading.Thread(target=worker)
+        t.start()
+
+        # Should be blocked
+        assert not unblocked.wait(timeout=0.05)
+
+        state.set_stop_requested()
+        assert unblocked.wait(timeout=1.0)
+        t.join(timeout=1.0)
+
+
 
 class TestProcessingStateThreadSafety:
     """Concurrent access tests for ProcessingState — separate class to avoid fixture pollution."""
@@ -174,6 +279,7 @@ class TestProcessingStateThreadSafety:
                     _ = state.current_image
                     _ = state.progress_pct
                     _ = state.stop_requested
+                    _ = state.paused
             except Exception as e:
                 errors.append(e)
 
@@ -219,6 +325,8 @@ class TestPipelineEngineBasicAPIs:
         status = engine.get_status()
 
         assert "running" in status
+        assert "paused" in status
+        assert status["paused"] is False
         assert "processed" in status
         assert "total" in status
         assert "currentImage" in status

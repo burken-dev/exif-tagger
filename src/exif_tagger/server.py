@@ -274,6 +274,30 @@ def api_start(req: StartRequest):
     return {"status": "started"}
 
 
+@app.post("/api/pause")
+def api_pause():
+    engine = _get_engine()
+    if not engine.state.running:
+        raise HTTPException(status_code=400, detail="No active processing session is running")
+    if engine.state.paused:
+        raise HTTPException(status_code=400, detail="Processing session is already paused")
+
+    result = engine.pause()
+    return result
+
+
+@app.post("/api/resume")
+def api_resume():
+    engine = _get_engine()
+    if not engine.state.running:
+        raise HTTPException(status_code=400, detail="No active processing session is running")
+    if not engine.state.paused:
+        raise HTTPException(status_code=400, detail="Processing session is not paused")
+
+    result = engine.resume()
+    return result
+
+
 @app.post("/api/stop")
 def api_stop():
     engine = _get_engine()

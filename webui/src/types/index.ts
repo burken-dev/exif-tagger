@@ -35,6 +35,7 @@ export interface LogItem {
 
 export interface ProcessingStatus {
   running: boolean;
+  paused?: boolean;
   stopRequested?: boolean;
   total?: number;
   processed?: number;

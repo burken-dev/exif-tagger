@@ -9,6 +9,7 @@ import { FolderSelectModal } from '@/components/gallery/FolderSelectModal';
 export const ProcessingTab: React.FC = () => {
   const {
     isRunning,
+    isPaused,
     rootDirectory,
     folderPath,
     maxImages,
@@ -24,6 +25,8 @@ export const ProcessingTab: React.FC = () => {
     folderBreadcrumbs,
     foldersLoading,
     startProcessing,
+    pauseProcessing,
+    resumeProcessing,
     stopProcessing,
     clearLogs,
     fetchFolders,
@@ -56,6 +59,24 @@ export const ProcessingTab: React.FC = () => {
     }
   };
 
+  const handlePause = async () => {
+    const res = await pauseProcessing();
+    if (res.success) {
+      showToast('Processing session paused', 'info');
+    } else if (res.error) {
+      showToast(res.error, 'error');
+    }
+  };
+
+  const handleResume = async () => {
+    const res = await resumeProcessing();
+    if (res.success) {
+      showToast('Processing session resumed', 'success');
+    } else if (res.error) {
+      showToast(res.error, 'error');
+    }
+  };
+
   const handleStop = async () => {
     const res = await stopProcessing();
     if (res) {
@@ -77,7 +98,10 @@ export const ProcessingTab: React.FC = () => {
         maxImages={maxImages}
         onMaxImagesChange={setMaxImages}
         isRunning={isRunning}
+        isPaused={isPaused}
         onStart={handleStart}
+        onPause={handlePause}
+        onResume={handleResume}
         onStop={handleStop}
       />
 
@@ -87,6 +111,7 @@ export const ProcessingTab: React.FC = () => {
         progressPct={progressPct}
         statusText={statusText}
         isRunning={isRunning}
+        isPaused={isPaused}
         summary={summary}
       />
 

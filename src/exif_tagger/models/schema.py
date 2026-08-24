@@ -7,7 +7,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
 
 # ---------------------------------------------------------------------------
 # Image support – vilka filändelser vi accepterar
@@ -117,11 +117,13 @@ class GalleryIndexConfig(BaseModel):
 class Config(BaseModel):
     """Hela konfigurationen av exif-tagger."""
 
+    model_config = ConfigDict(populate_by_name=True, extra="allow")
+
     root_directory: str = Field(
         default="/data/images",
         description="Sökväg till rot-mappen som ska skannas rekursivt",
     )
-    ai_model: ModelConfig = Field(alias="model", default_factory=ModelConfig)
+    ai_model: ModelConfig = Field(validation_alias=AliasChoices("model", "ai_model"), default_factory=ModelConfig)
     tags: dict[str, TagDefinition] = Field(default_factory=dict)
     gallery_index: GalleryIndexConfig = Field(default_factory=GalleryIndexConfig)
     guardrails: GuardrailConfig = Field(default_factory=GuardrailConfig)
@@ -170,8 +172,6 @@ class Config(BaseModel):
                 re.compile(pattern)
             except re.error as exc:
                 raise ValueError(f"Invalid regex pattern '{pattern}': {exc}") from exc
-
-    model_config = ConfigDict(extra="allow")
 
 
 # ---------------------------------------------------------------------------

@@ -3,6 +3,7 @@ import type { LogItem, ProcessingStatus, FolderItem, FolderBreadcrumb, FoldersRe
 
 export function useProcessing() {
   const [isRunning, setIsRunning] = useState<boolean>(false);
+  const [isPaused, setIsPaused] = useState<boolean>(false);
   const [rootDirectory, setRootDirectory] = useState<string>('');
   const [folderPath, setFolderPathState] = useState<string>(() => {
     try {
@@ -94,21 +95,25 @@ export function useProcessing() {
       const data: ProcessingStatus = await resp.json();
 
       const runningState = Boolean(data.running);
+      const pausedState = Boolean(data.paused);
       const prevWasRunning = wasRunningRef.current;
       wasRunningRef.current = runningState;
 
       if (runningState) {
         setIsRunning(true);
-        setStatusText('Running');
+        setIsPaused(pausedState);
+        setStatusText(pausedState ? 'Paused' : 'Running');
         setSummary(data.summary || null);
         setProcessedCount(data.processed || 0);
         setTotalCount(data.total || 0);
         setProgressPct(data.progressPct || 0);
       } else if (data.stopRequested) {
         setIsRunning(false);
+        setIsPaused(false);
         setStatusText('Stopping...');
       } else {
         setIsRunning(false);
+        setIsPaused(false);
         if (prevWasRunning) {
           const hasFailures =
             data.summary && (data.summary.failed > 0 || (data.summary.errors && data.summary.errors.length > 0));
@@ -199,6 +204,7 @@ export function useProcessing() {
           setSummary(null);
           wasRunningRef.current = true;
           setIsRunning(true);
+          setIsPaused(false);
           setStatusText('Running');
           setLogs([{ id: 0, text: 'Session started.', type: 'info' }]);
           return { success: true };
@@ -212,6 +218,38 @@ export function useProcessing() {
     },
     [folderPath, maxImages]
   );
+
+  const pauseProcessing = useCallback(async () => {
+    try {
+      const resp = await fetch('/api/pause', { method: 'POST' });
+      if (resp.ok) {
+        setIsPaused(true);
+        setStatusText('Paused');
+        return { success: true };
+      } else {
+        const errData = await resp.json();
+        return { success: false, error: errData.detail || 'Failed to pause session' };
+      }
+    } catch (e: any) {
+      return { success: false, error: 'Network error: ' + (e.message || 'Unknown error') };
+    }
+  }, []);
+
+  const resumeProcessing = useCallback(async () => {
+    try {
+      const resp = await fetch('/api/resume', { method: 'POST' });
+      if (resp.ok) {
+        setIsPaused(false);
+        setStatusText('Running');
+        return { success: true };
+      } else {
+        const errData = await resp.json();
+        return { success: false, error: errData.detail || 'Failed to resume session' };
+      }
+    } catch (e: any) {
+      return { success: false, error: 'Network error: ' + (e.message || 'Unknown error') };
+    }
+  }, []);
 
   const stopProcessing = useCallback(async () => {
     try {
@@ -254,6 +292,7 @@ export function useProcessing() {
 
   return {
     isRunning,
+    isPaused,
     rootDirectory,
     folderPath,
     maxImages,
@@ -269,6 +308,8 @@ export function useProcessing() {
     folderBreadcrumbs,
     foldersLoading,
     startProcessing,
+    pauseProcessing,
+    resumeProcessing,
     stopProcessing,
     clearLogs,
     fetchFolders,

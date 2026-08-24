@@ -13,8 +13,11 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from exif_tagger import image_scanner
 from exif_tagger.exif_writer import get_existing_xptags, set_xptags
-from exif_tagger.image_scanner import _is_image_path, build_exclude_compilers, scan_images
+from exif_tagger.image_scanner import _is_image_path, build_exclude_compilers
+
+scan_images = image_scanner.scan_images
 
 logger = logging.getLogger(__name__)
 
@@ -159,7 +162,7 @@ def sync_gallery_index(
         logger.warning("sync_gallery_index: invalid root directory: %s", root_directory)
         return {"total": 0, "indexed": 0, "updated": 0, "deleted": 0}
 
-    scanned_paths = scan_images(root, exclude_patterns=exclude_patterns)
+    scanned_paths = image_scanner.scan_images(root, exclude_patterns=exclude_patterns)
     scanned_map = {str(p.resolve()): p for p in scanned_paths}
 
     conn = get_connection(db_path)

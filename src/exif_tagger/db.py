@@ -742,9 +742,7 @@ def get_gallery_folders(
                         unprocessed_image_ids.add(img_id)
                         break
                     e_hash, e_mtime = existing_eval
-                    mtime_matches = abs(e_mtime - mtime) < 0.001 or (
-                        exif_m is not None and abs(exif_m - mtime) < 0.001
-                    )
+                    mtime_matches = abs(e_mtime - mtime) < 0.001 or (exif_m is not None and abs(exif_m - mtime) < 0.001)
                     if e_hash != target_hash or not mtime_matches:
                         unprocessed_image_ids.add(img_id)
                         break
@@ -1263,9 +1261,7 @@ def get_unevaluated_candidates(
                 existing_eval = eval_map.get((img_id, clean_tag))
                 if existing_eval is not None:
                     e_hash, e_mtime = existing_eval
-                    mtime_matches = abs(e_mtime - mtime) < 0.001 or (
-                        exif_m is not None and abs(exif_m - mtime) < 0.001
-                    )
+                    mtime_matches = abs(e_mtime - mtime) < 0.001 or (exif_m is not None and abs(exif_m - mtime) < 0.001)
                     if e_hash == desc_hash and mtime_matches:
                         continue
 

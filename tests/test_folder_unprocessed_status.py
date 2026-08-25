@@ -277,10 +277,10 @@ def test_api_gallery_folders_response_schema(tmp_path: Path, monkeypatch):
 
 
 def test_pipeline_engine_exif_write_syncs_mtime_and_stays_processed(tmp_path: Path, monkeypatch):
-    from unittest.mock import MagicMock
     from PIL import Image
+
     import exif_tagger.main as main_mod
-    from exif_tagger.models.schema import TagResult, TaggingResponse
+    from exif_tagger.models.schema import TaggingResponse, TagResult
 
     root_dir = tmp_path / "images"
     root_dir.mkdir()

@@ -14,11 +14,7 @@ import { ImageGrid } from './ImageGrid';
 import { ImageDetailModal } from './ImageDetailModal';
 import { PaginationFooter } from './PaginationFooter';
 
-interface GalleryTabProps {
-  onProcessFolder?: (path: string) => void;
-}
-
-export const GalleryTab: React.FC<GalleryTabProps> = ({ onProcessFolder }) => {
+export const GalleryTab: React.FC = () => {
   const {
     images,
     allTags,
@@ -82,18 +78,6 @@ export const GalleryTab: React.FC<GalleryTabProps> = ({ onProcessFolder }) => {
   const handleOpenFolderModal = () => {
     fetchFolders(currentFolder || '');
     setIsFolderModalOpen(true);
-  };
-
-  const handleProcessFolder = (path: string) => {
-    setIsFolderModalOpen(false);
-    if (onProcessFolder) {
-      onProcessFolder(path);
-    } else {
-      try {
-        localStorage.setItem('exif_tagger_processing_folderPath', path);
-      } catch {}
-      window.location.hash = '#processing';
-    }
   };
 
   const handleSyncIndex = async (mode: 'all' | 'filtered' = 'all') => {
@@ -278,7 +262,6 @@ export const GalleryTab: React.FC<GalleryTabProps> = ({ onProcessFolder }) => {
         breadcrumbs={folderBreadcrumbs}
         onNavigate={(path) => fetchFolders(path)}
         onSelectFolder={setCurrentFolder}
-        onProcessFolder={handleProcessFolder}
         isFoldersLoading={foldersLoading}
       />
 

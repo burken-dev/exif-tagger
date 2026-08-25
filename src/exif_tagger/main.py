@@ -502,13 +502,38 @@ class PipelineEngine:
                     finally:
                         conn.close()
 
+                    # Map raw model results to target_tags with sanitization
+                    cleaned_results: dict[str, Any] = {}
+                    for tr in response.results:
+                        raw_name = str(tr.tag_name).strip().strip("'\"`_*#[]:").lower()
+                        matched_key = None
+                        if raw_name in target_tags:
+                            matched_key = raw_name
+                        else:
+                            for target_k in target_tags:
+                                if target_k == raw_name or target_k in raw_name or raw_name in target_k:
+                                    matched_key = target_k
+                                    break
+                        if matched_key:
+                            cleaned_results[matched_key] = tr
+
+                    # For any requested candidate tag omitted by the model response, record as not matched
+                    from exif_tagger.models.schema import TagResult
+
+                    for target_k in target_tags:
+                        if target_k not in cleaned_results:
+                            cleaned_results[target_k] = TagResult(
+                                tag_name=target_k,
+                                score=0.0,
+                                reason="Not identified by vision model",
+                            )
+
                     # 1. Identify which tags exceeded threshold in this response
                     matched_in_response = []
-                    for tr in response.results:
-                        t_name = tr.tag_name.lower()
+                    for t_name, tr in cleaned_results.items():
                         tag_def = current_config.tags.get(t_name)
                         if tag_def is not None and tr.score >= tag_def.threshold:
-                            matched_in_response.append(tr)
+                            matched_in_response.append((t_name, tr))
 
                     # 2. Check hallucination overflow guardrail
                     guardrail_cfg = getattr(current_config, "guardrails", None)
@@ -517,7 +542,7 @@ class PipelineEngine:
                     on_overflow = (guardrail_cfg.on_overflow if guardrail_cfg else "suppress").lower()
 
                     if guardrail_enabled and len(matched_in_response) > max_matched:
-                        matched_names = [tr.tag_name for tr in matched_in_response]
+                        matched_names = [t_name for t_name, _ in matched_in_response]
                         if on_overflow == "suppress":
                             logger.warning(
                                 "⚠️ Hallucination guardrail triggered on %s: %d tags matched (%s > max %d). Suppressing EXIF write.",
@@ -528,9 +553,9 @@ class PipelineEngine:
                             )
                             tags_to_apply = set()
                         elif on_overflow == "top_k":
-                            sorted_by_score = sorted(matched_in_response, key=lambda x: x.score, reverse=True)
+                            sorted_by_score = sorted(matched_in_response, key=lambda x: x[1].score, reverse=True)
                             kept = sorted_by_score[:max_matched]
-                            tags_to_apply = {tr.tag_name.lower() for tr in kept}
+                            tags_to_apply = {t_name for t_name, _ in kept}
                             logger.warning(
                                 "⚠️ Hallucination guardrail triggered on %s: %d tags matched (%s > max %d). Keeping top %d by score: %s.",
                                 img_path.name,
@@ -538,7 +563,7 @@ class PipelineEngine:
                                 matched_names,
                                 max_matched,
                                 max_matched,
-                                [tr.tag_name for tr in kept],
+                                [t_name for t_name, _ in kept],
                             )
                         else:  # "warn"
                             logger.warning(
@@ -548,14 +573,12 @@ class PipelineEngine:
                                 matched_names,
                                 max_matched,
                             )
-                            tags_to_apply = {tr.tag_name.lower() for tr in matched_in_response}
+                            tags_to_apply = {t_name for t_name, _ in matched_in_response}
                     else:
-                        tags_to_apply = {tr.tag_name.lower() for tr in matched_in_response}
+                        tags_to_apply = {t_name for t_name, _ in matched_in_response}
 
                     newly_matched = False
-                    for tr in response.results:
-                        t_name = tr.tag_name.lower()
-                        tag_def = current_config.tags.get(t_name)
+                    for t_name, tr in cleaned_results.items():
                         desc_hash = current_tag_hashes.get(t_name, "")
                         is_match = t_name in tags_to_apply
 
@@ -580,12 +603,23 @@ class PipelineEngine:
                         sorted_tags = sorted(current_exif_tags)
                         modified = set_xptags(img_path, sorted_tags)
 
+                        # Fetch updated file mtime after EXIF write and sync DB records
+                        new_mtime = img_path.stat().st_mtime if img_path.exists() else img_mtime
+
                         from datetime import UTC, datetime
 
                         now_iso = datetime.now(UTC).isoformat()
                         conn = get_connection()
                         try:
                             with conn:
+                                conn.execute(
+                                    "UPDATE images SET last_modified = ?, exif_mtime = ? WHERE id = ?",
+                                    (new_mtime, new_mtime, img_id),
+                                )
+                                conn.execute(
+                                    "UPDATE tag_evaluations SET image_mtime = ? WHERE image_id = ?",
+                                    (new_mtime, img_id),
+                                )
                                 conn.execute("DELETE FROM image_tags WHERE image_id = ?", (img_id,))
                                 for t in sorted_tags:
                                     conn.execute(

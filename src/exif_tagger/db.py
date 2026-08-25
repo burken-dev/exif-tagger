@@ -713,7 +713,7 @@ def get_gallery_folders(
         num_active_tags = len(tag_hashes)
 
         # Query all images
-        img_rows = conn.execute("SELECT id, relative_path, last_modified FROM images").fetchall()
+        img_rows = conn.execute("SELECT id, relative_path, last_modified, exif_mtime FROM images").fetchall()
 
         # Build lookup set of suppressions: set of (image_id, tag_name)
         sup_rows = conn.execute("SELECT image_id, tag_name FROM user_suppressions").fetchall()
@@ -733,6 +733,7 @@ def get_gallery_folders(
             for r in img_rows:
                 img_id = r["id"]
                 mtime = r["last_modified"]
+                exif_m = r["exif_mtime"]
                 for tag_name, target_hash in tag_hashes.items():
                     if (img_id, tag_name) in suppressed_set:
                         continue
@@ -741,7 +742,10 @@ def get_gallery_folders(
                         unprocessed_image_ids.add(img_id)
                         break
                     e_hash, e_mtime = existing_eval
-                    if e_hash != target_hash or abs(e_mtime - mtime) >= 0.001:
+                    mtime_matches = abs(e_mtime - mtime) < 0.001 or (
+                        exif_m is not None and abs(exif_m - mtime) < 0.001
+                    )
+                    if e_hash != target_hash or not mtime_matches:
                         unprocessed_image_ids.add(img_id)
                         break
 
@@ -904,6 +908,7 @@ def update_image_tags_in_db_and_exif(
 
         with conn:
             conn.execute("UPDATE images SET last_modified = ?, exif_mtime = ? WHERE id = ?", (mtime, mtime, image_id))
+            conn.execute("UPDATE tag_evaluations SET image_mtime = ? WHERE image_id = ?", (mtime, image_id))
             conn.execute("DELETE FROM image_tags WHERE image_id = ?", (image_id,))
             for t in clean_tags:
                 source = "manual_ui" if t in added_tags else "model"
@@ -977,6 +982,7 @@ def batch_update_tags(
                     conn.execute(
                         "UPDATE images SET last_modified = ?, exif_mtime = ? WHERE id = ?", (mtime, mtime, img_id)
                     )
+                    conn.execute("UPDATE tag_evaluations SET image_mtime = ? WHERE image_id = ?", (mtime, img_id))
                     conn.execute("DELETE FROM image_tags WHERE image_id = ?", (img_id,))
                     for t in sorted_tags:
                         source = "manual_ui" if t in to_add else "model"
@@ -1212,7 +1218,7 @@ def get_unevaluated_candidates(
 
     try:
         # Build image filtering query
-        query_sql = "SELECT id, file_path, relative_path, last_modified FROM images"
+        query_sql = "SELECT id, file_path, relative_path, last_modified, exif_mtime FROM images"
         params: list[Any] = []
 
         if subfolder:
@@ -1243,6 +1249,7 @@ def get_unevaluated_candidates(
             img_path_str = row["file_path"]
             rel_path = row["relative_path"]
             mtime = row["last_modified"]
+            exif_m = row["exif_mtime"]
 
             for tag_name, tag_def in active_tags.items():
                 clean_tag = tag_name.strip().lower()
@@ -1256,7 +1263,10 @@ def get_unevaluated_candidates(
                 existing_eval = eval_map.get((img_id, clean_tag))
                 if existing_eval is not None:
                     e_hash, e_mtime = existing_eval
-                    if e_hash == desc_hash and abs(e_mtime - mtime) < 0.001:
+                    mtime_matches = abs(e_mtime - mtime) < 0.001 or (
+                        exif_m is not None and abs(exif_m - mtime) < 0.001
+                    )
+                    if e_hash == desc_hash and mtime_matches:
                         continue
 
                 candidates.append(
@@ -1369,6 +1379,7 @@ def evaluate_thresholds_locally(
                     conn.execute(
                         "UPDATE images SET last_modified = ?, exif_mtime = ? WHERE id = ?", (mtime, mtime, img_id)
                     )
+                    conn.execute("UPDATE tag_evaluations SET image_mtime = ? WHERE image_id = ?", (mtime, img_id))
                     conn.execute("DELETE FROM image_tags WHERE image_id = ?", (img_id,))
                     for t in sorted_tags:
                         conn.execute(

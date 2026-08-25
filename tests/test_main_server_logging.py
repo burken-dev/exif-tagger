@@ -10,11 +10,12 @@ DUMMY_MODEL = ModelConfig(base_url="http://localhost:11434/v1", model_name="gpt-
 
 
 def test_setup_logging_from_config(tmp_path):
+    logger = logging.getLogger("exif_tagger")
+    logger.handlers.clear()
     log_dir = str(tmp_path / "cli_logs")
     cfg = Config(root_directory=".", model=DUMMY_MODEL, log_level="DEBUG", log_dir=log_dir)
     setup_secure_logging(level=cfg.log_level, log_dir=cfg.log_dir, logger_name="exif_tagger")
 
-    logger = logging.getLogger("exif_tagger")
     assert logger.level == logging.DEBUG
     log_file = Path(log_dir) / "exif-tagger.log"
     assert log_file.exists()

@@ -274,3 +274,54 @@ def test_api_gallery_folders_response_schema(tmp_path: Path, monkeypatch):
     assert len(data_sub["breadcrumbs"]) == 2
     assert data_sub["breadcrumbs"][0]["unprocessed_images"] == 1
     assert data_sub["breadcrumbs"][1]["unprocessed_images"] == 1
+
+
+def test_pipeline_engine_exif_write_syncs_mtime_and_stays_processed(tmp_path: Path, monkeypatch):
+    from unittest.mock import MagicMock
+    from PIL import Image
+    import exif_tagger.main as main_mod
+    from exif_tagger.models.schema import TagResult, TaggingResponse
+
+    root_dir = tmp_path / "images"
+    root_dir.mkdir()
+    img_file = root_dir / "test.jpg"
+    img = Image.new("RGB", (100, 100), color="blue")
+    img.save(img_file, "JPEG")
+
+    db_file = tmp_path / "gallery.db"
+    cfg_file = tmp_path / "config.yaml"
+
+    cfg_data = {
+        "root_directory": str(root_dir),
+        "model": {"base_url": "http://localhost:11434/v1", "model_name": "mock-model"},
+        "tags": {
+            "nature": {"description": "Green trees and rivers", "threshold": 0.5},
+            "city": {"description": "Skyscrapers and streets", "threshold": 0.5},
+        },
+    }
+    with open(cfg_file, "w") as f:
+        yaml.safe_dump(cfg_data, f)
+
+    monkeypatch.setenv("EXIFTAGGER_DB_FILE", str(db_file))
+    monkeypatch.setenv("EXIFTAGGER_CONFIG_FILE", str(cfg_file))
+
+    # Mock tag_image_with_ai to return markdown/quoted tag for nature and omit city
+    def mock_tag_image_with_ai(model_cfg, path, tags, max_dim=None):
+        return TaggingResponse(
+            results=[TagResult(tag_name="_nature_", score=0.95, reason="Lush forest visible")],
+            scene_description="A beautiful green forest",
+            summary="Forest",
+        )
+
+    monkeypatch.setattr("exif_tagger.ai_client.tag_image_with_ai", mock_tag_image_with_ai)
+
+    engine = main_mod.PipelineEngine(config_path=cfg_file)
+    summary = engine.start_session()
+
+    assert summary["total_processed"] == 1
+    assert summary["successfully_tagged"] == 1
+
+    # Verify get_gallery_folders reflects 0 unprocessed images
+    folders_res = get_gallery_folders(relative_path="", db_path=db_file, root_directory=root_dir, config_path=cfg_file)
+    assert folders_res["total_images"] == 1
+    assert folders_res["unprocessed_images"] == 0

@@ -62,8 +62,7 @@ class TestGalleryDatabase:
         init_db(test_db_path)
         conn = get_connection(test_db_path)
         try:
-            tables = {r["name"] for r in conn.execute(
-                "SELECT name FROM sqlite_master WHERE type='table'")}
+            tables = {r["name"] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
             assert "dir_mtimes" in tables
             cols = {r["name"] for r in conn.execute("PRAGMA table_info(images)")}
             assert "exif_mtime" in cols
@@ -362,8 +361,7 @@ def test_sync_extracts_exif_when_exif_mtime_null(tmp_path):
 
     conn = get_connection(db_path)
     try:
-        tags = [r["tag_name"] for r in conn.execute(
-            "SELECT tag_name FROM image_tags WHERE image_id = ?", (img_id,))]
+        tags = [r["tag_name"] for r in conn.execute("SELECT tag_name FROM image_tags WHERE image_id = ?", (img_id,))]
         mtime = conn.execute("SELECT exif_mtime FROM images WHERE id = ?", (img_id,)).fetchone()["exif_mtime"]
     finally:
         conn.close()
@@ -399,8 +397,7 @@ def test_sync_second_run_is_skip_no_re_extract(tmp_path):
     assert stats2["updated"] == 0
 
     conn = get_connection(db_path)
-    tags = {r["tag_name"] for r in conn.execute(
-        "SELECT tag_name FROM image_tags WHERE image_id = ?", (img_id,))}
+    tags = {r["tag_name"] for r in conn.execute("SELECT tag_name FROM image_tags WHERE image_id = ?", (img_id,))}
     conn.close()
     assert tags == {"nature", "useronly"}  # nothing re-read, nothing wiped
 
@@ -457,8 +454,7 @@ def test_update_image_in_db_from_file_gates_on_exif_mtime(tmp_path):
     update_image_in_db_from_file(img, root_directory=tmp_path, db_path=db_path)
 
     conn = get_connection(db_path)
-    tags = {r["tag_name"] for r in conn.execute(
-        "SELECT tag_name FROM image_tags WHERE image_id = ?", (img_id,))}
+    tags = {r["tag_name"] for r in conn.execute("SELECT tag_name FROM image_tags WHERE image_id = ?", (img_id,))}
     conn.close()
     assert tags == {"tag1", "useronly"}
 

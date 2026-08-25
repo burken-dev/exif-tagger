@@ -246,7 +246,6 @@ class TestProcessingState:
         t.join(timeout=1.0)
 
 
-
 class TestProcessingStateThreadSafety:
     """Concurrent access tests for ProcessingState — separate class to avoid fixture pollution."""
 
@@ -367,9 +366,7 @@ class TestPipelineEnginePauseResume:
                 "model_name": "model-v1",
                 "api_key": "test",
             },
-            "tags": {
-                "tag1": {"description": "Initial tag 1", "threshold": 0.7}
-            },
+            "tags": {"tag1": {"description": "Initial tag 1", "threshold": 0.7}},
         }
         cfg_file.write_text(yaml.safe_dump(initial_cfg))
 
@@ -714,7 +711,9 @@ class TestPipelineEngineIntegration:
                             summary = engine.start_session(root_directory=str(images_dir), max_images=1)
 
                             logs = [l["text"] for l in engine.state.get_logs()]
-                            assert any("Found 1 images in processing plan (2 total images in folder)." in l for l in logs)
+                            assert any(
+                                "Found 1 images in processing plan (2 total images in folder)." in l for l in logs
+                            )
                             assert summary["total_images_found"] == 2
                             assert summary["total_processed"] == 1
                             assert engine.state.total == 1

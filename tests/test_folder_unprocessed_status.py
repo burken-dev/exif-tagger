@@ -18,7 +18,6 @@ from exif_tagger.db import (
 from exif_tagger.server import app
 
 
-
 def test_get_gallery_folders_unprocessed_counts(tmp_path: Path):
     db_file = tmp_path / "gallery.db"
     root_dir = tmp_path / "images"
@@ -92,7 +91,9 @@ def test_get_gallery_folders_unprocessed_counts(tmp_path: Path):
     portrait_hash = compute_tag_hash("People and faces")
 
     record_tag_evaluation(3, "nature", nature_hash, "matched", 0.9, "nature ok", "test", 1000.0, db_path=db_file)
-    record_tag_evaluation(3, "portrait", portrait_hash, "unmatched", 0.1, "not portrait", "test", 1000.0, db_path=db_file)
+    record_tag_evaluation(
+        3, "portrait", portrait_hash, "unmatched", 0.1, "not portrait", "test", 1000.0, db_path=db_file
+    )
 
     res2 = get_gallery_folders(relative_path="", db_path=db_file, root_directory=root_dir, config_path=cfg_file)
     folder_map2 = {f["name"]: f for f in res2["folders"]}
@@ -105,7 +106,9 @@ def test_get_gallery_folders_unprocessed_counts(tmp_path: Path):
     record_user_suppression(1, "portrait", reason="manual", db_path=db_file)
 
     # Navigate inside vacation
-    res_vac = get_gallery_folders(relative_path="vacation", db_path=db_file, root_directory=root_dir, config_path=cfg_file)
+    res_vac = get_gallery_folders(
+        relative_path="vacation", db_path=db_file, root_directory=root_dir, config_path=cfg_file
+    )
     assert res_vac["total_images"] == 2
     assert res_vac["unprocessed_images"] == 1
     beach_folder = res_vac["folders"][0]
@@ -271,5 +274,3 @@ def test_api_gallery_folders_response_schema(tmp_path: Path, monkeypatch):
     assert len(data_sub["breadcrumbs"]) == 2
     assert data_sub["breadcrumbs"][0]["unprocessed_images"] == 1
     assert data_sub["breadcrumbs"][1]["unprocessed_images"] == 1
-
-

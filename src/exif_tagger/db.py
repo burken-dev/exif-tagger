@@ -174,7 +174,9 @@ def sync_gallery_index(
     try:
         with conn:
             # 1. Purge records for files that no longer exist or are no longer in scanned set
-            existing_rows = conn.execute("SELECT id, file_path, relative_path, last_modified, exif_mtime FROM images").fetchall()
+            existing_rows = conn.execute(
+                "SELECT id, file_path, relative_path, last_modified, exif_mtime FROM images"
+            ).fetchall()
             existing_db_map = {}
             for row in existing_rows:
                 raw_fp = row["file_path"]
@@ -204,9 +206,7 @@ def sync_gallery_index(
 
                 db_entry = existing_db_map.get(abs_path_str)
                 needs_update = (
-                    db_entry is None
-                    or db_entry["exif_mtime"] is None
-                    or abs(db_entry["exif_mtime"] - mtime) > 0.001
+                    db_entry is None or db_entry["exif_mtime"] is None or abs(db_entry["exif_mtime"] - mtime) > 0.001
                 )
 
                 if needs_update:
@@ -353,9 +353,7 @@ def reconcile_gallery_index(
                     continue
 
             if not full:
-                baseline = conn.execute(
-                    "SELECT mtime FROM dir_mtimes WHERE dir_path = ?", (d_abs,)
-                ).fetchone()
+                baseline = conn.execute("SELECT mtime FROM dir_mtimes WHERE dir_path = ?", (d_abs,)).fetchone()
                 if baseline is not None and abs(baseline["mtime"] - d_mtime) <= _MTIME_EPS:
                     continue  # walked but unchanged -> no DB work
 
@@ -374,7 +372,7 @@ def reconcile_gallery_index(
                         "WHERE relative_path NOT LIKE '%/%'",
                     ).fetchall()
 
-                old_by_seg = {r["relative_path"][len(prefix):] if prefix else r["relative_path"]: r for r in children}
+                old_by_seg = {r["relative_path"][len(prefix) :] if prefix else r["relative_path"]: r for r in children}
 
                 present_files: dict[str, os.DirEntry[str]] = {}
                 present_dirs: set[str] = set()
@@ -414,7 +412,13 @@ def reconcile_gallery_index(
                             cand_mtime = r["last_modified"]
                         conn.execute(
                             "UPDATE images SET file_path = ?, filename = ?, relative_path = ?, last_modified = ? WHERE id = ?",
-                            (str((d_path / cand_name).resolve()), cand_name, f"{prefix}{cand_name}", cand_mtime, r["id"]),
+                            (
+                                str((d_path / cand_name).resolve()),
+                                cand_name,
+                                f"{prefix}{cand_name}",
+                                cand_mtime,
+                                r["id"],
+                            ),
                         )
                         stats["updated"] += 1
                         continue
@@ -433,8 +437,7 @@ def reconcile_gallery_index(
                 # Subtree purge for removed/renamed child dirs: absent from scandir
                 # but still present in dir_mtimes baselines.
                 stored_children = conn.execute(
-                    "SELECT dir_path FROM dir_mtimes "
-                    "WHERE dir_path LIKE ? AND dir_path NOT LIKE ?",
+                    "SELECT dir_path FROM dir_mtimes WHERE dir_path LIKE ? AND dir_path NOT LIKE ?",
                     (f"{d_abs}/%", f"{d_abs}/%/%"),
                 ).fetchall()
                 for sc in stored_children:
@@ -535,8 +538,7 @@ def get_gallery_images(
         where = f"WHERE {' AND '.join(clauses)} " if clauses else ""
 
         rows = conn.execute(
-            f"SELECT i.id, i.file_path, i.filename, i.relative_path, i.last_modified "
-            f"FROM images i {where}",
+            f"SELECT i.id, i.file_path, i.filename, i.relative_path, i.last_modified FROM images i {where}",
             params,
         ).fetchall()
 
@@ -651,9 +653,9 @@ def get_gallery_folders(
     config_path: str | Path | None = None,
 ) -> dict[str, Any]:
     """Get subdirectories under relative_path from disk with recursive image counts and unprocessed counts from DB."""
-    from exif_tagger.config import compute_tag_hash, get_config_path, load_config
-
     import yaml
+
+    from exif_tagger.config import compute_tag_hash, get_config_path, load_config
 
     cfg = None
     active_tags = {}
@@ -702,7 +704,11 @@ def get_gallery_folders(
     try:
         tag_hashes: dict[str, str] = {}
         for name, td in active_tags.items():
-            desc = td.description if hasattr(td, "description") else (td.get("description", "") if isinstance(td, dict) else str(td))
+            desc = (
+                td.description
+                if hasattr(td, "description")
+                else (td.get("description", "") if isinstance(td, dict) else str(td))
+            )
             tag_hashes[name.strip().lower()] = compute_tag_hash(desc)
         num_active_tags = len(tag_hashes)
 
@@ -778,9 +784,7 @@ def get_gallery_folders(
                         child_folder = parts[depth]
                         folder_total_counts[child_folder] = folder_total_counts.get(child_folder, 0) + 1
                         if is_unproc:
-                            folder_unprocessed_counts[child_folder] = (
-                                folder_unprocessed_counts.get(child_folder, 0) + 1
-                            )
+                            folder_unprocessed_counts[child_folder] = folder_unprocessed_counts.get(child_folder, 0) + 1
     finally:
         conn.close()
 
@@ -970,7 +974,9 @@ def batch_update_tags(
                 mtime = img_path.stat().st_mtime if img_path.exists() else 0.0
 
                 with conn:
-                    conn.execute("UPDATE images SET last_modified = ?, exif_mtime = ? WHERE id = ?", (mtime, mtime, img_id))
+                    conn.execute(
+                        "UPDATE images SET last_modified = ?, exif_mtime = ? WHERE id = ?", (mtime, mtime, img_id)
+                    )
                     conn.execute("DELETE FROM image_tags WHERE image_id = ?", (img_id,))
                     for t in sorted_tags:
                         source = "manual_ui" if t in to_add else "model"
@@ -1053,9 +1059,7 @@ def update_image_in_db_from_file(
     conn = get_connection(db_path)
     try:
         with conn:
-            row = conn.execute(
-                "SELECT id, exif_mtime FROM images WHERE file_path = ?", (abs_path_str,)
-            ).fetchone()
+            row = conn.execute("SELECT id, exif_mtime FROM images WHERE file_path = ?", (abs_path_str,)).fetchone()
             if row is None:
                 cursor = conn.execute(
                     """
@@ -1362,7 +1366,9 @@ def evaluate_thresholds_locally(
                 now_iso = datetime.now(UTC).isoformat()
 
                 with conn:
-                    conn.execute("UPDATE images SET last_modified = ?, exif_mtime = ? WHERE id = ?", (mtime, mtime, img_id))
+                    conn.execute(
+                        "UPDATE images SET last_modified = ?, exif_mtime = ? WHERE id = ?", (mtime, mtime, img_id)
+                    )
                     conn.execute("DELETE FROM image_tags WHERE image_id = ?", (img_id,))
                     for t in sorted_tags:
                         conn.execute(

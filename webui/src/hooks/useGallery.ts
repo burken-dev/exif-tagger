@@ -17,6 +17,7 @@ export function useGallery() {
   const [pageSize, setPageSize] = useState<number>(48);
   const [totalImages, setTotalImages] = useState<number>(0);
   const [folders, setFolders] = useState<FolderItem[]>([]);
+  const [foldersResponse, setFoldersResponse] = useState<FoldersResponse | null>(null);
   const [modalFolder, setModalFolder] = useState<string>('');
   const [folderBreadcrumbs, setFolderBreadcrumbs] = useState<FolderBreadcrumb[]>([]);
   const [selectedImageDetail, setSelectedImageDetail] = useState<GalleryImage | null>(null);
@@ -215,10 +216,12 @@ export function useGallery() {
       const resp = await fetch(`/api/gallery/folders?path=${encodeURIComponent(path)}`);
       if (!resp.ok) throw new Error('Failed to fetch folders');
       const data: FoldersResponse = await resp.json();
+      setFoldersResponse(data);
       setFolders(data.folders || []);
       setFolderBreadcrumbs(data.breadcrumbs || []);
     } catch (err: any) {
       console.error('Failed to load modal folders:', err);
+      setFoldersResponse(null);
       setFolders([]);
       setFolderBreadcrumbs([]);
     } finally {
@@ -581,6 +584,7 @@ export function useGallery() {
     pageSize,
     totalImages,
     folders,
+    foldersResponse,
     modalFolder,
     folderBreadcrumbs,
     selectedImageDetail,

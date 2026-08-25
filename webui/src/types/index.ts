@@ -13,15 +13,21 @@ export interface GalleryImage {
 export interface FolderItem {
   name: string;
   relative_path: string;
+  total_images?: number;
+  unprocessed_images?: number;
+  image_count?: number;
 }
 
 export interface FolderBreadcrumb {
   name: string;
   path: string;
+  unprocessed_images?: number;
 }
 
 export interface FoldersResponse {
   current_path: string;
+  total_images?: number;
+  unprocessed_images?: number;
   breadcrumbs: FolderBreadcrumb[];
   folders: FolderItem[];
 }

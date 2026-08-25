@@ -37,12 +37,19 @@ export function AppContent() {
     }
   };
 
+  const handleProcessFolderFromGallery = (path: string) => {
+    try {
+      localStorage.setItem('exif_tagger_processing_folderPath', path);
+    } catch {}
+    handleTabChange('processing');
+  };
+
   const renderTabContent = () => {
     switch (activeTab) {
       case 'processing':
         return <ProcessingTab />;
       case 'gallery':
-        return <GalleryTab />;
+        return <GalleryTab onProcessFolder={handleProcessFolderFromGallery} />;
       case 'config':
         return <ConfigTab />;
       case 'schedule':

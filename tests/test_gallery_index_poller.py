@@ -1,4 +1,5 @@
 """Tests for reconcile_gallery_index — the discovery-layer walker."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -81,7 +82,9 @@ def test_reconcile_rename_preserves_id_and_tags(tmp_path):
     old_row = db_rows(db)["old.jpg"]
 
     conn = get_connection(db)
-    conn.execute("INSERT INTO image_tags (image_id, tag_name, source) VALUES (?, 'manual', 'manual_exif')", (old_row["id"],))
+    conn.execute(
+        "INSERT INTO image_tags (image_id, tag_name, source) VALUES (?, 'manual', 'manual_exif')", (old_row["id"],)
+    )
     conn.commit()
     conn.close()
 
@@ -123,6 +126,7 @@ def test_reconcile_removed_folder_purges_subtree(tmp_path):
     reconcile_gallery_index(root, db_path=db)
 
     import shutil
+
     shutil.rmtree(root / "sub")
     stats = reconcile_gallery_index(root, db_path=db)
 

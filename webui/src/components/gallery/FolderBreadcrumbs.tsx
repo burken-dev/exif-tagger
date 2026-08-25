@@ -1,27 +1,33 @@
 import React from 'react';
 import { Folder, FolderOpen, ChevronRight, HardDrive } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import type { FolderBreadcrumb } from '@/types';
 
 interface FolderBreadcrumbsProps {
   currentFolder: string;
   onSelectFolder: (path: string) => void;
   onOpenModal: () => void;
+  breadcrumbs?: FolderBreadcrumb[];
 }
 
 export const FolderBreadcrumbs: React.FC<FolderBreadcrumbsProps> = ({
   currentFolder,
   onSelectFolder,
   onOpenModal,
+  breadcrumbs: propBreadcrumbs,
 }) => {
   const parts = currentFolder ? currentFolder.split('/').filter(Boolean) : [];
 
-  const breadcrumbs = [
-    { name: 'Root', path: '' },
-    ...parts.map((part, index) => ({
-      name: part,
-      path: parts.slice(0, index + 1).join('/'),
-    })),
-  ];
+  const breadcrumbs: FolderBreadcrumb[] =
+    propBreadcrumbs && propBreadcrumbs.length > 0
+      ? propBreadcrumbs
+      : [
+          { name: 'Root', path: '' },
+          ...parts.map((part, index) => ({
+            name: part,
+            path: parts.slice(0, index + 1).join('/'),
+          })),
+        ];
 
   return (
     <div className="flex flex-wrap items-center justify-between gap-3 p-3 rounded-lg border border-border bg-card/50 text-card-foreground">
@@ -43,6 +49,12 @@ export const FolderBreadcrumbs: React.FC<FolderBreadcrumbsProps> = ({
               >
                 {idx === 0 ? <FolderOpen className="w-3.5 h-3.5 shrink-0" /> : null}
                 <span>{b.name}</span>
+                {b.unprocessed_images !== undefined && b.unprocessed_images > 0 && (
+                  <span
+                    className="w-2 h-2 rounded-full bg-amber-500 inline-block ml-1"
+                    title={`${b.unprocessed_images} pending images`}
+                  />
+                )}
               </button>
             </React.Fragment>
           );

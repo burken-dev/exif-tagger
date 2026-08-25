@@ -169,8 +169,10 @@ class TestConfig:
         assert config.gallery_index.poll_interval_seconds == 30
 
     def test_gallery_index_env_override(self, tmp_path, monkeypatch):
-        config_data = {"root_directory": str(tmp_path),
-                       "model": {"base_url": "https://api.test.com/v1", "model_name": "test-model"}}
+        config_data = {
+            "root_directory": str(tmp_path),
+            "model": {"base_url": "https://api.test.com/v1", "model_name": "test-model"},
+        }
         config_file = tmp_path / "config.yaml"
         with open(config_file, "w") as fh:
             yaml.dump(config_data, fh)

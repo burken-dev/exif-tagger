@@ -677,9 +677,7 @@ class PipelineEngine:
         from exif_tagger.db import evaluate_thresholds_locally
 
         config = self._load_config()
-        self._live_tag_hashes = {
-            name: compute_tag_hash(tag_def.description) for name, tag_def in config.tags.items()
-        }
+        self._live_tag_hashes = {name: compute_tag_hash(tag_def.description) for name, tag_def in config.tags.items()}
 
         # Zero-cost local threshold re-evaluation with updated tags/thresholds
         try:

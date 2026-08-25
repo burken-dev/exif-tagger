@@ -6,6 +6,7 @@ import sqlite3
 from pathlib import Path
 
 import yaml
+from fastapi.testclient import TestClient
 
 from exif_tagger.config import compute_tag_hash
 from exif_tagger.db import (
@@ -14,6 +15,8 @@ from exif_tagger.db import (
     record_tag_evaluation,
     record_user_suppression,
 )
+from exif_tagger.server import app
+
 
 
 def test_get_gallery_folders_unprocessed_counts(tmp_path: Path):
@@ -204,3 +207,69 @@ def test_get_gallery_folders_no_active_tags(tmp_path: Path):
     res = get_gallery_folders(relative_path="", db_path=db_file, root_directory=root_dir, config_path=cfg_file)
     assert res["total_images"] == 1
     assert res["unprocessed_images"] == 0
+
+
+def test_api_gallery_folders_response_schema(tmp_path: Path, monkeypatch):
+    import exif_tagger.server as srv
+
+    root_dir = tmp_path / "images"
+    root_dir.mkdir()
+    sub_dir = root_dir / "sub"
+    sub_dir.mkdir()
+
+    img_file = sub_dir / "pic.jpg"
+    img_file.write_text("dummy")
+
+    cfg_file = tmp_path / "config.yaml"
+    cfg_data = {
+        "root_directory": str(root_dir),
+        "model": {"base_url": "http://localhost:11434/v1", "model_name": "test-model"},
+        "tags": {"animal": {"description": "Wild animals", "threshold": 0.5}},
+    }
+    with open(cfg_file, "w") as f:
+        yaml.safe_dump(cfg_data, f)
+
+    db_file = tmp_path / "gallery.db"
+    init_db(db_file)
+    conn = sqlite3.connect(str(db_file))
+    with conn:
+        conn.execute(
+            "INSERT INTO images (id, file_path, filename, relative_path, last_modified, indexed_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (1, str(img_file), "pic.jpg", "sub/pic.jpg", 1000.0, "2026-08-25T00:00:00Z"),
+        )
+    conn.close()
+
+    monkeypatch.setenv("EXIFTAGGER_DB_FILE", str(db_file))
+    monkeypatch.setattr(srv, "CONFIG_PATH", str(cfg_file))
+
+    client = TestClient(app)
+    resp = client.get("/api/gallery/folders")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "current_path" in data
+    assert "total_images" in data
+    assert "unprocessed_images" in data
+    assert "breadcrumbs" in data
+    assert "folders" in data
+    assert data["current_path"] == ""
+    assert data["total_images"] == 1
+    assert data["unprocessed_images"] == 1
+    assert len(data["breadcrumbs"]) == 1
+    assert data["breadcrumbs"][0]["unprocessed_images"] == 1
+    assert len(data["folders"]) == 1
+    assert data["folders"][0]["name"] == "sub"
+    assert data["folders"][0]["total_images"] == 1
+    assert data["folders"][0]["unprocessed_images"] == 1
+
+    # Query with path=sub
+    resp_sub = client.get("/api/gallery/folders?path=sub")
+    assert resp_sub.status_code == 200
+    data_sub = resp_sub.json()
+    assert data_sub["current_path"] == "sub"
+    assert data_sub["total_images"] == 1
+    assert data_sub["unprocessed_images"] == 1
+    assert len(data_sub["breadcrumbs"]) == 2
+    assert data_sub["breadcrumbs"][0]["unprocessed_images"] == 1
+    assert data_sub["breadcrumbs"][1]["unprocessed_images"] == 1
+
+

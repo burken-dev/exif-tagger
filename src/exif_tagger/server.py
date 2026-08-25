@@ -667,7 +667,11 @@ def api_get_gallery_folders(path: str = ""):
 
     try:
         config = load_config(CONFIG_PATH)
-        data = get_gallery_folders(relative_path=path, root_directory=config.root_directory)
+        data = get_gallery_folders(
+            relative_path=path,
+            root_directory=config.root_directory,
+            config_path=CONFIG_PATH,
+        )
         return data
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to query gallery folders: {e}")

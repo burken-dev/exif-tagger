@@ -648,15 +648,33 @@ def get_gallery_folders(
     relative_path: str = "",
     db_path: str | Path | None = None,
     root_directory: str | Path | None = None,
+    config_path: str | Path | None = None,
 ) -> dict[str, Any]:
-    """Get subdirectories under relative_path from disk with image counts from DB."""
-    from exif_tagger.config import load_config
+    """Get subdirectories under relative_path from disk with recursive image counts and unprocessed counts from DB."""
+    from exif_tagger.config import compute_tag_hash, get_config_path, load_config
 
-    if root_directory is None:
-        try:
-            config = load_config()
-            root_directory = config.root_directory
-        except Exception:
+    import yaml
+
+    cfg = None
+    active_tags = {}
+    resolved_config_path = get_config_path(config_path)
+    try:
+        cfg = load_config(resolved_config_path)
+        if root_directory is None:
+            root_directory = cfg.root_directory
+        active_tags = cfg.tags if cfg and cfg.tags else {}
+    except Exception:
+        if resolved_config_path.exists():
+            try:
+                with open(resolved_config_path, encoding="utf-8") as f:
+                    raw_cfg = yaml.safe_load(f) or {}
+                    if isinstance(raw_cfg, dict):
+                        if root_directory is None and "root_directory" in raw_cfg:
+                            root_directory = raw_cfg["root_directory"]
+                        active_tags = raw_cfg.get("tags") or {}
+            except Exception:
+                pass
+        if root_directory is None:
             root_directory = Path(".")
 
     clean_rel = relative_path.strip().strip("/").replace("\\", "/")
@@ -673,47 +691,128 @@ def get_gallery_folders(
             if item.is_dir() and not item.name.startswith("."):
                 all_subfolders.add(item.name)
 
-    # Get image counts per folder from DB
-    image_counts: dict[str, int] = {}
-    if db_path is not None:
-        init_db(db_path)
-        conn = get_connection(db_path)
-        try:
-            rows = conn.execute("SELECT relative_path FROM images").fetchall()
-            for r in rows:
-                rel_p = r["relative_path"].replace("\\", "/")
-                parts = [p for p in rel_p.split("/") if p]
-                if not clean_rel:
-                    if len(parts) > 1:
-                        child_folder = parts[0]
-                        image_counts[child_folder] = image_counts.get(child_folder, 0) + 1
-                else:
-                    rel_parts = [p for p in clean_rel.split("/") if p]
-                    depth = len(rel_parts)
-                    if len(parts) > depth + 1 and [p.lower() for p in parts[:depth]] == rel_parts:
+    total_images_in_scope = 0
+    unprocessed_images_in_scope = 0
+    folder_total_counts: dict[str, int] = {}
+    folder_unprocessed_counts: dict[str, int] = {}
+    breadcrumb_unprocessed_counts: dict[str, int] = {}
+
+    init_db(db_path)
+    conn = get_connection(db_path)
+    try:
+        tag_hashes: dict[str, str] = {}
+        for name, td in active_tags.items():
+            desc = td.description if hasattr(td, "description") else (td.get("description", "") if isinstance(td, dict) else str(td))
+            tag_hashes[name.strip().lower()] = compute_tag_hash(desc)
+        num_active_tags = len(tag_hashes)
+
+        # Query all images
+        img_rows = conn.execute("SELECT id, relative_path, last_modified FROM images").fetchall()
+
+        # Build lookup set of suppressions: set of (image_id, tag_name)
+        sup_rows = conn.execute("SELECT image_id, tag_name FROM user_suppressions").fetchall()
+        suppressed_set = {(r["image_id"], r["tag_name"].lower()) for r in sup_rows}
+
+        # Build lookup dict of existing evaluations: (image_id, tag_name) -> (description_hash, image_mtime)
+        eval_rows = conn.execute(
+            "SELECT image_id, tag_name, description_hash, image_mtime FROM tag_evaluations"
+        ).fetchall()
+        eval_map = {
+            (r["image_id"], r["tag_name"].lower()): (r["description_hash"], r["image_mtime"]) for r in eval_rows
+        }
+
+        # Identify which image_ids are unprocessed
+        unprocessed_image_ids: set[int] = set()
+        if num_active_tags > 0:
+            for r in img_rows:
+                img_id = r["id"]
+                mtime = r["last_modified"]
+                for tag_name, target_hash in tag_hashes.items():
+                    if (img_id, tag_name) in suppressed_set:
+                        continue
+                    existing_eval = eval_map.get((img_id, tag_name))
+                    if existing_eval is None:
+                        unprocessed_image_ids.add(img_id)
+                        break
+                    e_hash, e_mtime = existing_eval
+                    if e_hash != target_hash or abs(e_mtime - mtime) >= 0.001:
+                        unprocessed_image_ids.add(img_id)
+                        break
+
+        # Calculate recursive rollups for current scope, subfolders, and breadcrumbs
+        rel_parts = [p for p in clean_rel.split("/") if p]
+        depth = len(rel_parts)
+
+        for r in img_rows:
+            img_id = r["id"]
+            rel_p = r["relative_path"].replace("\\", "/")
+            parts = [p for p in rel_p.split("/") if p]
+            is_unproc = img_id in unprocessed_image_ids
+
+            # Check breadcrumb rollups
+            accum: list[str] = []
+            for part in parts[:-1]:
+                accum.append(part)
+                b_path = "/".join(accum)
+                if is_unproc:
+                    breadcrumb_unprocessed_counts[b_path] = breadcrumb_unprocessed_counts.get(b_path, 0) + 1
+            if is_unproc:
+                breadcrumb_unprocessed_counts[""] = breadcrumb_unprocessed_counts.get("", 0) + 1
+
+            # Check if this image is inside clean_rel
+            if not clean_rel:
+                total_images_in_scope += 1
+                if is_unproc:
+                    unprocessed_images_in_scope += 1
+                if len(parts) > 1:
+                    child_folder = parts[0]
+                    folder_total_counts[child_folder] = folder_total_counts.get(child_folder, 0) + 1
+                    if is_unproc:
+                        folder_unprocessed_counts[child_folder] = folder_unprocessed_counts.get(child_folder, 0) + 1
+            else:
+                if len(parts) > depth and [p.lower() for p in parts[:depth]] == [p.lower() for p in rel_parts]:
+                    total_images_in_scope += 1
+                    if is_unproc:
+                        unprocessed_images_in_scope += 1
+                    if len(parts) > depth + 1:
                         child_folder = parts[depth]
-                        image_counts[child_folder] = image_counts.get(child_folder, 0) + 1
-        finally:
-            conn.close()
+                        folder_total_counts[child_folder] = folder_total_counts.get(child_folder, 0) + 1
+                        if is_unproc:
+                            folder_unprocessed_counts[child_folder] = (
+                                folder_unprocessed_counts.get(child_folder, 0) + 1
+                            )
+    finally:
+        conn.close()
 
     folders_list = [
         {
             "name": name,
             "relative_path": f"{clean_rel}/{name}" if clean_rel else name,
-            "image_count": image_counts.get(name, 0),
+            "total_images": folder_total_counts.get(name, 0),
+            "unprocessed_images": folder_unprocessed_counts.get(name, 0),
+            "image_count": folder_total_counts.get(name, 0),  # Backwards compatibility
         }
         for name in sorted(all_subfolders)
     ]
 
-    breadcrumbs = [{"name": "Root", "path": ""}]
+    breadcrumbs = [{"name": "Root", "path": "", "unprocessed_images": breadcrumb_unprocessed_counts.get("", 0)}]
     if clean_rel:
         accum = []
         for part in clean_rel.split("/"):
             accum.append(part)
-            breadcrumbs.append({"name": part, "path": "/".join(accum)})
+            b_path = "/".join(accum)
+            breadcrumbs.append(
+                {
+                    "name": part,
+                    "path": b_path,
+                    "unprocessed_images": breadcrumb_unprocessed_counts.get(b_path, 0),
+                }
+            )
 
     return {
         "current_path": clean_rel,
+        "total_images": total_images_in_scope,
+        "unprocessed_images": unprocessed_images_in_scope,
         "breadcrumbs": breadcrumbs,
         "folders": folders_list,
     }

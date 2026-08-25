@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { Folder, FolderOpen, ChevronRight, Check, Loader2, Play } from 'lucide-react';
+import { Folder, FolderOpen, ChevronRight, Check, Loader2 } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -20,7 +20,6 @@ interface FolderSelectModalProps {
   breadcrumbs: FolderBreadcrumb[];
   onNavigate: (path: string) => void;
   onSelectFolder: (path: string) => void;
-  onProcessFolder?: (path: string) => void;
   isFoldersLoading?: boolean;
   title?: string;
   description?: string;
@@ -34,7 +33,6 @@ export const FolderSelectModal: React.FC<FolderSelectModalProps> = ({
   breadcrumbs,
   onNavigate,
   onSelectFolder,
-  onProcessFolder,
   isFoldersLoading = false,
   title = 'Select Image Directory',
   description = 'Navigate directories to filter your gallery photos.',
@@ -84,7 +82,7 @@ export const FolderSelectModal: React.FC<FolderSelectModalProps> = ({
                     <span>{b.name || 'Root'}</span>
                     {b.unprocessed_images !== undefined && b.unprocessed_images > 0 && (
                       <span
-                        className="w-2 h-2 rounded-full bg-amber-500 inline-block ml-1"
+                        className="w-2 h-2 rounded-full bg-amber-500 inline-block ml-1 shrink-0"
                         title={`${b.unprocessed_images} pending images`}
                       />
                     )}
@@ -145,36 +143,19 @@ export const FolderSelectModal: React.FC<FolderSelectModalProps> = ({
                       </div>
                       <div className="mt-1">
                         {hasPending ? (
-                          <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30">
+                          <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30 whitespace-nowrap inline-block">
                             {f.unprocessed_images} / {totalCount} pending
                           </span>
                         ) : totalCount > 0 ? (
-                          <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-muted text-muted-foreground">
+                          <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-muted text-muted-foreground whitespace-nowrap inline-block">
                             {totalCount} images
                           </span>
                         ) : (
-                          <span className="text-[11px] text-muted-foreground/60 italic">0 images</span>
+                          <span className="text-[11px] text-muted-foreground/60 italic whitespace-nowrap inline-block">0 images</span>
                         )}
                       </div>
                     </div>
                     <div className="flex items-center gap-1.5 shrink-0">
-                      {onProcessFolder && (
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          className="h-7 px-2 text-xs text-amber-600 dark:text-amber-400 hover:bg-amber-500/15 transition-colors"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onProcessFolder(f.relative_path);
-                            onOpenChange(false);
-                          }}
-                          title={`Process "${f.name}"`}
-                        >
-                          <Play className="w-3 h-3 mr-1 fill-current" />
-                          Process
-                        </Button>
-                      )}
                       <Button
                         type="button"
                         variant="ghost"

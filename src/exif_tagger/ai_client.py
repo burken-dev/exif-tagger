@@ -76,19 +76,22 @@ def setup_secure_logging(
     stream_handler.setLevel(log_level)
     main_logger.addHandler(stream_handler)
 
-    log_path = Path(log_dir)
-    log_path.mkdir(parents=True, exist_ok=True)
-    file_handler = TimedRotatingFileHandler(
-        log_path / "exif-tagger.log",
-        when="midnight",
-        interval=1,
-        backupCount=30,
-        encoding="utf-8",
-    )
-    file_handler.setFormatter(formatter)
-    file_handler.addFilter(redactor)
-    file_handler.setLevel(log_level)
-    main_logger.addHandler(file_handler)
+    try:
+        log_path = Path(log_dir)
+        log_path.mkdir(parents=True, exist_ok=True)
+        file_handler = TimedRotatingFileHandler(
+            log_path / "exif-tagger.log",
+            when="midnight",
+            interval=1,
+            backupCount=30,
+            encoding="utf-8",
+        )
+        file_handler.setFormatter(formatter)
+        file_handler.addFilter(redactor)
+        file_handler.setLevel(log_level)
+        main_logger.addHandler(file_handler)
+    except (OSError, PermissionError) as exc:
+        logger.warning("Could not setup file logging in '%s': %s", log_dir, exc)
 
 
 MAX_IMAGE_DIMENSION = 1024

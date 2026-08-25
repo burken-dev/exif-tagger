@@ -48,19 +48,6 @@ export const ProcessingTab: React.FC = () => {
     setIsFolderModalOpen(false);
   };
 
-  const handleProcessFolder = async (path: string) => {
-    setFolderPath(path);
-    setIsFolderModalOpen(false);
-    const res = await startProcessing(path);
-    if (res) {
-      if (res.success) {
-        showToast('Processing session started', 'success');
-      } else if (res.error) {
-        showToast(res.error, 'error');
-      }
-    }
-  };
-
   const handleStart = async () => {
     const res = await startProcessing();
     if (res) {
@@ -144,7 +131,6 @@ export const ProcessingTab: React.FC = () => {
         breadcrumbs={folderBreadcrumbs}
         onNavigate={(path) => fetchFolders(path)}
         onSelectFolder={handleSelectFolder}
-        onProcessFolder={handleProcessFolder}
         isFoldersLoading={foldersLoading}
         title="Select Processing Directory"
         description="Navigate and select the directory containing images to process."

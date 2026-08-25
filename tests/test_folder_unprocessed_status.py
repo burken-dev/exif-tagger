@@ -293,6 +293,7 @@ def test_pipeline_engine_exif_write_syncs_mtime_and_stays_processed(tmp_path: Pa
 
     cfg_data = {
         "root_directory": str(root_dir),
+        "log_dir": str(tmp_path / "logs"),
         "model": {"base_url": "http://localhost:11434/v1", "model_name": "mock-model"},
         "tags": {
             "nature": {"description": "Green trees and rivers", "threshold": 0.5},

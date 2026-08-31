@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
+import base64
+import io
 import json
 
 import pytest
+from PIL import Image
 
 from exif_tagger.ai_client import (
     _build_prompt,
     _build_structured_output_config,
+    _image_to_base64,
     _parse_response,
     tag_image_with_ai,
 )
@@ -257,3 +261,36 @@ class TestStructuredOutputs:
 
         result = tag_image_with_ai(model_config, sample_jpeg, tags)
         assert len(result.results) >= 1
+
+
+class TestImageToBase64:
+    """Tests for _image_to_base64 fast downscaling and format support."""
+
+    def test_image_to_base64_fast_resizing(self, sample_jpeg):
+        b64_str = _image_to_base64(sample_jpeg, max_dim=100, fmt="jpeg", quality=80)
+        assert isinstance(b64_str, str)
+        assert len(b64_str) > 0
+        img_data = base64.b64decode(b64_str)
+        with Image.open(io.BytesIO(img_data)) as img:
+            assert max(img.size) <= 100
+
+    def test_image_to_base64_webp_format(self, sample_jpeg):
+        b64_str = _image_to_base64(sample_jpeg, max_dim=50, fmt="webp", quality=80)
+        assert isinstance(b64_str, str)
+        img_data = base64.b64decode(b64_str)
+        with Image.open(io.BytesIO(img_data)) as img:
+            assert img.format == "WEBP"
+            assert max(img.size) <= 50
+
+    def test_image_to_base64_large_jpeg_draft(self, tmp_path):
+        large_img = Image.new("RGB", (2000, 1500), color=(100, 150, 200))
+        img_path = tmp_path / "large_photo.jpg"
+        large_img.save(img_path, format="JPEG")
+
+        b64_str = _image_to_base64(img_path, max_dim=512, fmt="jpeg", quality=80)
+        assert isinstance(b64_str, str)
+        img_data = base64.b64decode(b64_str)
+        with Image.open(io.BytesIO(img_data)) as img:
+            assert max(img.size) <= 512
+
+

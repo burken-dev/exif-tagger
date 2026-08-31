@@ -106,22 +106,22 @@ def _image_to_base64(
     fmt: str = "jpeg",
     quality: int = 80,
 ) -> str:
-    """Convert a local image file to base64-encoded JPEG or WebP (resized if needed)."""
+    """Convert a local image file to base64-encoded JPEG or WebP with fast downsampling."""
+    import io
+
     with Image.open(image_path) as img:
-        if img.mode in ("RGBA", "LA", "P") or img.mode != "RGB":
+        # Fast draft downsample for JPEG
+        if hasattr(img, "draft") and img.format == "JPEG":
+            img.draft("RGB", (max_dim, max_dim))
+
+        if img.mode != "RGB":
             img = img.convert("RGB")
 
-        width, height = img.size
-        if max(width, height) > max_dim:
-            ratio = max_dim / max(width, height)
-            new_w = int(width * ratio)
-            new_h = int(height * ratio)
-            img = img.resize((new_w, new_h), Image.LANCZOS)
-
-        import io
+        if max(img.size) > max_dim:
+            img.thumbnail((max_dim, max_dim), Image.Resampling.BILINEAR)
 
         buffer = io.BytesIO()
-        pil_format = "WEBP" if fmt == "webp" else "JPEG"
+        pil_format = "WEBP" if fmt.lower() == "webp" else "JPEG"
         img.save(buffer, format=pil_format, quality=quality)
         return base64.b64encode(buffer.getvalue()).decode("utf-8")
 

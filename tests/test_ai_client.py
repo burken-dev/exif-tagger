@@ -300,7 +300,6 @@ class TestOpenAIClientCaching:
     """Tests for OpenAI client caching and connection pooling."""
 
     def test_get_openai_client_caches_and_reuses_instance(self):
-        from exif_tagger.ai_client import clear_client_cache, get_openai_client
 
         clear_client_cache()
         client1 = get_openai_client(base_url="http://localhost:8000/v1", api_key="sk-test")
@@ -308,7 +307,6 @@ class TestOpenAIClientCaching:
         assert client1 is client2
 
     def test_get_openai_client_creates_different_instance_for_different_endpoints(self):
-        from exif_tagger.ai_client import clear_client_cache, get_openai_client
 
         clear_client_cache()
         client1 = get_openai_client(base_url="http://localhost:8000/v1", api_key="sk-test")
@@ -316,7 +314,6 @@ class TestOpenAIClientCaching:
         assert client1 is not client2
 
     def test_get_openai_client_handles_none_api_key(self):
-        from exif_tagger.ai_client import clear_client_cache, get_openai_client
 
         clear_client_cache()
         client1 = get_openai_client(base_url="http://localhost:8000/v1", api_key=None)
@@ -324,7 +321,6 @@ class TestOpenAIClientCaching:
         assert client1 is client2
 
     def test_clear_client_cache_resets_cache(self):
-        from exif_tagger.ai_client import clear_client_cache, get_openai_client
 
         clear_client_cache()
         client1 = get_openai_client(base_url="http://localhost:8000/v1", api_key="sk-test")
@@ -334,7 +330,6 @@ class TestOpenAIClientCaching:
 
     def test_get_openai_client_thread_safety(self):
         import concurrent.futures
-        from exif_tagger.ai_client import clear_client_cache, get_openai_client
 
         clear_client_cache()
 
@@ -356,7 +351,8 @@ class TestOpenAIClientCaching:
 
     def test_call_vision_api_reuses_cached_client(self, sample_jpeg, monkeypatch):
         from unittest.mock import MagicMock
-        from exif_tagger.ai_client import clear_client_cache, tag_image_with_ai
+
+        from exif_tagger.ai_client import tag_image_with_ai
 
         clear_client_cache()
         instantiation_count = 0
@@ -384,7 +380,3 @@ class TestOpenAIClientCaching:
         tag_image_with_ai(model_config, sample_jpeg, tags)
 
         assert instantiation_count == 1
-
-
-
-

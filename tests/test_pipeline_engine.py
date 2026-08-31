@@ -1001,12 +1001,14 @@ class TestPipelineEngine3Stage:
     """Tests specifically targeting the 3-stage decoupled pipeline (Prefetch -> Inference -> Writer)."""
 
     def test_pipeline_engine_3_stage_execution_completes_all_images(self, tmp_path):
+        from unittest.mock import MagicMock, patch
+
         import yaml
         from PIL import Image
-        from unittest.mock import MagicMock, patch
+
+        from exif_tagger.db import get_gallery_images
         from exif_tagger.main import PipelineEngine
         from exif_tagger.models.schema import TagResult
-        from exif_tagger.db import get_gallery_images
 
         images_dir = tmp_path / "stage_images"
         images_dir.mkdir(exist_ok=True)
@@ -1055,9 +1057,11 @@ class TestPipelineEngine3Stage:
 
     def test_pipeline_engine_3_stage_pause_and_resume(self, tmp_path):
         import time
+        from unittest.mock import MagicMock, patch
+
         import yaml
         from PIL import Image
-        from unittest.mock import MagicMock, patch
+
         from exif_tagger.main import PipelineEngine
         from exif_tagger.models.schema import TagResult
 
@@ -1118,9 +1122,11 @@ class TestPipelineEngine3Stage:
 
     def test_pipeline_engine_3_stage_stop_cancellation(self, tmp_path):
         import time
+        from unittest.mock import MagicMock, patch
+
         import yaml
         from PIL import Image
-        from unittest.mock import MagicMock, patch
+
         from exif_tagger.main import PipelineEngine
         from exif_tagger.models.schema import TagResult
 
@@ -1173,9 +1179,11 @@ class TestPipelineEngine3Stage:
         assert len(calls) < 8
 
     def test_pipeline_engine_3_stage_handles_prefetch_and_ai_errors(self, tmp_path):
+        from unittest.mock import MagicMock, patch
+
         import yaml
         from PIL import Image
-        from unittest.mock import MagicMock, patch
+
         from exif_tagger.main import PipelineEngine
         from exif_tagger.models.schema import TagResult
 
@@ -1219,6 +1227,7 @@ class TestPipelineEngine3Stage:
 
     def test_prepared_payload_and_write_task_dataclasses(self):
         from pathlib import Path
+
         from exif_tagger.main import PreparedPayload, WriteTask
 
         payload = PreparedPayload(
@@ -1249,8 +1258,10 @@ class TestPipelineEngine3Stage:
         assert write_task.error is None
 
     def test_pipeline_engine_3_stage_handles_corrupt_image_in_prefetch(self, tmp_path):
+        from unittest.mock import patch
+
         import yaml
-        from unittest.mock import MagicMock, patch
+
         from exif_tagger.main import PipelineEngine
 
         images_dir = tmp_path / "corrupt_images"

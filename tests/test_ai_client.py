@@ -14,6 +14,8 @@ from exif_tagger.ai_client import (
     _build_structured_output_config,
     _image_to_base64,
     _parse_response,
+    clear_client_cache,
+    get_openai_client,
     tag_image_with_ai,
 )
 from exif_tagger.models.schema import ModelConfig, TagDefinition
@@ -292,5 +294,97 @@ class TestImageToBase64:
         img_data = base64.b64decode(b64_str)
         with Image.open(io.BytesIO(img_data)) as img:
             assert max(img.size) <= 512
+
+
+class TestOpenAIClientCaching:
+    """Tests for OpenAI client caching and connection pooling."""
+
+    def test_get_openai_client_caches_and_reuses_instance(self):
+        from exif_tagger.ai_client import clear_client_cache, get_openai_client
+
+        clear_client_cache()
+        client1 = get_openai_client(base_url="http://localhost:8000/v1", api_key="sk-test")
+        client2 = get_openai_client(base_url="http://localhost:8000/v1", api_key="sk-test")
+        assert client1 is client2
+
+    def test_get_openai_client_creates_different_instance_for_different_endpoints(self):
+        from exif_tagger.ai_client import clear_client_cache, get_openai_client
+
+        clear_client_cache()
+        client1 = get_openai_client(base_url="http://localhost:8000/v1", api_key="sk-test")
+        client2 = get_openai_client(base_url="http://localhost:9000/v1", api_key="sk-test")
+        assert client1 is not client2
+
+    def test_get_openai_client_handles_none_api_key(self):
+        from exif_tagger.ai_client import clear_client_cache, get_openai_client
+
+        clear_client_cache()
+        client1 = get_openai_client(base_url="http://localhost:8000/v1", api_key=None)
+        client2 = get_openai_client(base_url="http://localhost:8000/v1")
+        assert client1 is client2
+
+    def test_clear_client_cache_resets_cache(self):
+        from exif_tagger.ai_client import clear_client_cache, get_openai_client
+
+        clear_client_cache()
+        client1 = get_openai_client(base_url="http://localhost:8000/v1", api_key="sk-test")
+        clear_client_cache()
+        client2 = get_openai_client(base_url="http://localhost:8000/v1", api_key="sk-test")
+        assert client1 is not client2
+
+    def test_get_openai_client_thread_safety(self):
+        import concurrent.futures
+        from exif_tagger.ai_client import clear_client_cache, get_openai_client
+
+        clear_client_cache()
+
+        def fetch_client(endpoint_idx: int):
+            endpoint = f"http://localhost:800{endpoint_idx % 3}/v1"
+            return endpoint_idx % 3, get_openai_client(base_url=endpoint, api_key="sk-test")
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+            results = list(executor.map(fetch_client, range(30)))
+
+        clients_by_endpoint: dict[int, list] = {}
+        for ep_idx, client in results:
+            clients_by_endpoint.setdefault(ep_idx, []).append(client)
+
+        for ep_idx, clients in clients_by_endpoint.items():
+            assert len(clients) == 10
+            for c in clients[1:]:
+                assert c is clients[0]
+
+    def test_call_vision_api_reuses_cached_client(self, sample_jpeg, monkeypatch):
+        from unittest.mock import MagicMock
+        from exif_tagger.ai_client import clear_client_cache, tag_image_with_ai
+
+        clear_client_cache()
+        instantiation_count = 0
+
+        class MockClient:
+            def __init__(self, *args, **kwargs):
+                nonlocal instantiation_count
+                instantiation_count += 1
+                self.chat = MagicMock()
+                mock_response = MagicMock()
+                mock_response.choices = [MagicMock()]
+                mock_response.choices[0].message.content = '{"results": [{"tag_name": "t", "score": 0.9}]}'
+                self.chat.completions.create.return_value = mock_response
+
+        monkeypatch.setattr("exif_tagger.ai_client.OpenAI", MockClient)
+
+        model_config = ModelConfig(
+            base_url="https://api.pool-test.com/v1",
+            model_name="test-model",
+        )
+        tags = {"t": TagDefinition(description="test", threshold=0.5)}
+
+        tag_image_with_ai(model_config, sample_jpeg, tags)
+        tag_image_with_ai(model_config, sample_jpeg, tags)
+        tag_image_with_ai(model_config, sample_jpeg, tags)
+
+        assert instantiation_count == 1
+
+
 
 

@@ -22,6 +22,17 @@ def isolate_test_db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     return db_file
 
 
+@pytest.fixture(autouse=True)
+def reset_ai_client_cache():
+    """Ensure every test starts and ends with a clean OpenAI client cache."""
+    from exif_tagger.ai_client import clear_client_cache
+
+    clear_client_cache()
+    yield
+    clear_client_cache()
+
+
+
 # ---------------------------------------------------------------------------
 # Fixtures for creating temporary images
 # ---------------------------------------------------------------------------

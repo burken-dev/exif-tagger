@@ -6,6 +6,7 @@ import base64
 import json
 import logging
 import re
+import threading
 import time
 from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
@@ -13,6 +14,25 @@ from typing import Any
 
 from openai import OpenAI
 from PIL import Image
+
+_CLIENT_CACHE: dict[tuple[str, str], OpenAI] = {}
+_CLIENT_CACHE_LOCK = threading.Lock()
+
+
+def get_openai_client(base_url: str, api_key: str | None = None) -> OpenAI:
+    """Return a cached, persistent OpenAI client instance for connection reuse."""
+    key = (base_url or "", api_key or "")
+    with _CLIENT_CACHE_LOCK:
+        if key not in _CLIENT_CACHE:
+            _CLIENT_CACHE[key] = OpenAI(base_url=base_url, api_key=api_key or "EMPTY")
+        return _CLIENT_CACHE[key]
+
+
+def clear_client_cache() -> None:
+    """Clear all cached OpenAI client instances."""
+    with _CLIENT_CACHE_LOCK:
+        _CLIENT_CACHE.clear()
+
 
 from exif_tagger.models.schema import (
     ModelConfig,
@@ -409,7 +429,7 @@ def _call_vision_api(
     last_error = None
     for attempt in range(1, MAX_RETRIES + 1):
         try:
-            client = OpenAI(
+            client = get_openai_client(
                 base_url=model_config.base_url,
                 api_key=model_config.api_key or "",
             )

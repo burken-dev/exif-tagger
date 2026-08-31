@@ -6,6 +6,7 @@ import base64
 import json
 import logging
 import re
+import threading
 import time
 from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
@@ -13,6 +14,25 @@ from typing import Any
 
 from openai import OpenAI
 from PIL import Image
+
+_CLIENT_CACHE: dict[tuple[str, str], OpenAI] = {}
+_CLIENT_CACHE_LOCK = threading.Lock()
+
+
+def get_openai_client(base_url: str, api_key: str | None = None) -> OpenAI:
+    """Return a cached, persistent OpenAI client instance for connection reuse."""
+    key = (base_url or "", api_key or "")
+    with _CLIENT_CACHE_LOCK:
+        if key not in _CLIENT_CACHE:
+            _CLIENT_CACHE[key] = OpenAI(base_url=base_url, api_key=api_key or "EMPTY")
+        return _CLIENT_CACHE[key]
+
+
+def clear_client_cache() -> None:
+    """Clear all cached OpenAI client instances."""
+    with _CLIENT_CACHE_LOCK:
+        _CLIENT_CACHE.clear()
+
 
 from exif_tagger.models.schema import (
     ModelConfig,
@@ -106,22 +126,22 @@ def _image_to_base64(
     fmt: str = "jpeg",
     quality: int = 80,
 ) -> str:
-    """Convert a local image file to base64-encoded JPEG or WebP (resized if needed)."""
+    """Convert a local image file to base64-encoded JPEG or WebP with fast downsampling."""
+    import io
+
     with Image.open(image_path) as img:
-        if img.mode in ("RGBA", "LA", "P") or img.mode != "RGB":
+        # Fast draft downsample for JPEG
+        if hasattr(img, "draft") and img.format == "JPEG":
+            img.draft("RGB", (max_dim, max_dim))
+
+        if img.mode != "RGB":
             img = img.convert("RGB")
 
-        width, height = img.size
-        if max(width, height) > max_dim:
-            ratio = max_dim / max(width, height)
-            new_w = int(width * ratio)
-            new_h = int(height * ratio)
-            img = img.resize((new_w, new_h), Image.LANCZOS)
-
-        import io
+        if max(img.size) > max_dim:
+            img.thumbnail((max_dim, max_dim), Image.Resampling.BILINEAR)
 
         buffer = io.BytesIO()
-        pil_format = "WEBP" if fmt == "webp" else "JPEG"
+        pil_format = "WEBP" if fmt.lower() == "webp" else "JPEG"
         img.save(buffer, format=pil_format, quality=quality)
         return base64.b64encode(buffer.getvalue()).decode("utf-8")
 
@@ -332,12 +352,16 @@ def _call_vision_api(
     image_path: Path,
     prompt: str,
     max_dim: int = MAX_IMAGE_DIMENSION,
+    image_b64: str | None = None,
+    mime_type: str | None = None,
 ) -> str:
     """Call the vision API with retries. Raises on persistent failure."""
     fmt = getattr(model_config, "image_format", "jpeg")
     quality = getattr(model_config, "image_quality", 80)
-    image_b64 = _image_to_base64(image_path, max_dim=max_dim, fmt=fmt, quality=quality)
-    mime_type = "image/webp" if fmt == "webp" else "image/jpeg"
+    if image_b64 is None:
+        image_b64 = _image_to_base64(image_path, max_dim=max_dim, fmt=fmt, quality=quality)
+    if mime_type is None:
+        mime_type = "image/webp" if fmt.lower() == "webp" else "image/jpeg"
 
     # Extract system_prompt and user_prompt from params if present
     params_copy = dict(model_config.params or {})
@@ -409,7 +433,7 @@ def _call_vision_api(
     last_error = None
     for attempt in range(1, MAX_RETRIES + 1):
         try:
-            client = OpenAI(
+            client = get_openai_client(
                 base_url=model_config.base_url,
                 api_key=model_config.api_key or "",
             )
@@ -464,16 +488,27 @@ def tag_image_with_ai(
     image_path: Path,
     tag_definitions: dict[str, TagDefinition],
     max_dim: int = MAX_IMAGE_DIMENSION,
+    image_b64: str | None = None,
+    prompt: str | None = None,
+    mime_type: str | None = None,
 ) -> TaggingResponse:
     if not tag_definitions:
         logger.debug("No tags defined – skipping AI call for %s", image_path.name)
         return TaggingResponse(results=[])
 
-    use_so = getattr(model_config, "use_structured_outputs", False)  # type: ignore[attr-defined]
-    prompt = _build_prompt(tag_definitions, use_structured_outputs=use_so)
+    if prompt is None:
+        use_so = getattr(model_config, "use_structured_outputs", False)  # type: ignore[attr-defined]
+        prompt = _build_prompt(tag_definitions, use_structured_outputs=use_so)
 
     # Call with retry logic
-    raw_response = _call_vision_api(model_config, image_path, prompt, max_dim=max_dim)
+    raw_response = _call_vision_api(
+        model_config,
+        image_path,
+        prompt,
+        max_dim=max_dim,
+        image_b64=image_b64,
+        mime_type=mime_type,
+    )
 
     # Parse the response
     try:

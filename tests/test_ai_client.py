@@ -2,14 +2,20 @@
 
 from __future__ import annotations
 
+import base64
+import io
 import json
 
 import pytest
+from PIL import Image
 
 from exif_tagger.ai_client import (
     _build_prompt,
     _build_structured_output_config,
+    _image_to_base64,
     _parse_response,
+    clear_client_cache,
+    get_openai_client,
     tag_image_with_ai,
 )
 from exif_tagger.models.schema import ModelConfig, TagDefinition
@@ -257,3 +263,120 @@ class TestStructuredOutputs:
 
         result = tag_image_with_ai(model_config, sample_jpeg, tags)
         assert len(result.results) >= 1
+
+
+class TestImageToBase64:
+    """Tests for _image_to_base64 fast downscaling and format support."""
+
+    def test_image_to_base64_fast_resizing(self, sample_jpeg):
+        b64_str = _image_to_base64(sample_jpeg, max_dim=100, fmt="jpeg", quality=80)
+        assert isinstance(b64_str, str)
+        assert len(b64_str) > 0
+        img_data = base64.b64decode(b64_str)
+        with Image.open(io.BytesIO(img_data)) as img:
+            assert max(img.size) <= 100
+
+    def test_image_to_base64_webp_format(self, sample_jpeg):
+        b64_str = _image_to_base64(sample_jpeg, max_dim=50, fmt="webp", quality=80)
+        assert isinstance(b64_str, str)
+        img_data = base64.b64decode(b64_str)
+        with Image.open(io.BytesIO(img_data)) as img:
+            assert img.format == "WEBP"
+            assert max(img.size) <= 50
+
+    def test_image_to_base64_large_jpeg_draft(self, tmp_path):
+        large_img = Image.new("RGB", (2000, 1500), color=(100, 150, 200))
+        img_path = tmp_path / "large_photo.jpg"
+        large_img.save(img_path, format="JPEG")
+
+        b64_str = _image_to_base64(img_path, max_dim=512, fmt="jpeg", quality=80)
+        assert isinstance(b64_str, str)
+        img_data = base64.b64decode(b64_str)
+        with Image.open(io.BytesIO(img_data)) as img:
+            assert max(img.size) <= 512
+
+
+class TestOpenAIClientCaching:
+    """Tests for OpenAI client caching and connection pooling."""
+
+    def test_get_openai_client_caches_and_reuses_instance(self):
+
+        clear_client_cache()
+        client1 = get_openai_client(base_url="http://localhost:8000/v1", api_key="sk-test")
+        client2 = get_openai_client(base_url="http://localhost:8000/v1", api_key="sk-test")
+        assert client1 is client2
+
+    def test_get_openai_client_creates_different_instance_for_different_endpoints(self):
+
+        clear_client_cache()
+        client1 = get_openai_client(base_url="http://localhost:8000/v1", api_key="sk-test")
+        client2 = get_openai_client(base_url="http://localhost:9000/v1", api_key="sk-test")
+        assert client1 is not client2
+
+    def test_get_openai_client_handles_none_api_key(self):
+
+        clear_client_cache()
+        client1 = get_openai_client(base_url="http://localhost:8000/v1", api_key=None)
+        client2 = get_openai_client(base_url="http://localhost:8000/v1")
+        assert client1 is client2
+
+    def test_clear_client_cache_resets_cache(self):
+
+        clear_client_cache()
+        client1 = get_openai_client(base_url="http://localhost:8000/v1", api_key="sk-test")
+        clear_client_cache()
+        client2 = get_openai_client(base_url="http://localhost:8000/v1", api_key="sk-test")
+        assert client1 is not client2
+
+    def test_get_openai_client_thread_safety(self):
+        import concurrent.futures
+
+        clear_client_cache()
+
+        def fetch_client(endpoint_idx: int):
+            endpoint = f"http://localhost:800{endpoint_idx % 3}/v1"
+            return endpoint_idx % 3, get_openai_client(base_url=endpoint, api_key="sk-test")
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+            results = list(executor.map(fetch_client, range(30)))
+
+        clients_by_endpoint: dict[int, list] = {}
+        for ep_idx, client in results:
+            clients_by_endpoint.setdefault(ep_idx, []).append(client)
+
+        for ep_idx, clients in clients_by_endpoint.items():
+            assert len(clients) == 10
+            for c in clients[1:]:
+                assert c is clients[0]
+
+    def test_call_vision_api_reuses_cached_client(self, sample_jpeg, monkeypatch):
+        from unittest.mock import MagicMock
+
+        from exif_tagger.ai_client import tag_image_with_ai
+
+        clear_client_cache()
+        instantiation_count = 0
+
+        class MockClient:
+            def __init__(self, *args, **kwargs):
+                nonlocal instantiation_count
+                instantiation_count += 1
+                self.chat = MagicMock()
+                mock_response = MagicMock()
+                mock_response.choices = [MagicMock()]
+                mock_response.choices[0].message.content = '{"results": [{"tag_name": "t", "score": 0.9}]}'
+                self.chat.completions.create.return_value = mock_response
+
+        monkeypatch.setattr("exif_tagger.ai_client.OpenAI", MockClient)
+
+        model_config = ModelConfig(
+            base_url="https://api.pool-test.com/v1",
+            model_name="test-model",
+        )
+        tags = {"t": TagDefinition(description="test", threshold=0.5)}
+
+        tag_image_with_ai(model_config, sample_jpeg, tags)
+        tag_image_with_ai(model_config, sample_jpeg, tags)
+        tag_image_with_ai(model_config, sample_jpeg, tags)
+
+        assert instantiation_count == 1

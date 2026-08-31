@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import argparse
 import logging
+import queue
 import sys
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -15,6 +17,36 @@ from exif_tagger.ai_client import setup_secure_logging
 
 CHECKPOINT_BATCH_SIZE = 100
 ERRORS_TO_DISPLAY_MAX = 10
+
+
+@dataclass
+class PreparedPayload:
+    img_path: Path
+    img_cand_list: list[dict[str, Any]]
+    img_id: int
+    img_mtime: float
+    target_tags: dict[str, Any]
+    prompt: str
+    image_b64: str | None = None
+    mime_type: str = "image/jpeg"
+    error: Exception | None = None
+
+
+@dataclass
+class WriteTask:
+    img_path: Path
+    img_cand_list: list[dict[str, Any]]
+    img_id: int
+    img_mtime: float
+    cleaned_results: dict[str, Any]
+    tags_to_apply: set[str]
+    current_exif_tags: set[str]
+    is_match: bool = False
+    error: Exception | None = None
+
+
+_PREFETCH_SENTINEL = object()
+_WRITE_SENTINEL = object()
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -458,201 +490,391 @@ class PipelineEngine:
             concurrency = getattr(config.ai_model, "concurrency", 1)
             logger.info("Processing %d images with concurrency=%d.", len(images_to_process), concurrency)
 
-            def process_image(img_path: Path) -> None:
-                nonlocal successfully_tagged, failed_count
+            prefetch_queue_size = max(8, concurrency * 2)
+            prefetch_queue: queue.Queue = queue.Queue(maxsize=prefetch_queue_size)
+            write_queue: queue.Queue = queue.Queue()
 
-                self.state.wait_if_paused()
-                if self.state.stop_requested:
-                    return
+            def prefetch_worker() -> None:
+                from exif_tagger.ai_client import _build_prompt, _image_to_base64
 
-                if self.verbose:
-                    logger.info("Processing: %s", img_path.name)
+                for img_path in images_to_process:
+                    self.state.wait_if_paused()
+                    if self.state.stop_requested:
+                        break
 
-                img_cand_list = images_candidates_map.get(str(img_path), [])
-                if not img_cand_list:
-                    self.state.update_progress(img_path.name)
-                    return
-
-                img_id = img_cand_list[0]["image_id"]
-                img_mtime = img_cand_list[0]["image_mtime"]
-
-                current_config = self._config or config
-                current_tag_hashes = getattr(self, "_live_tag_hashes", tag_hashes) or tag_hashes
-
-                target_tags = {
-                    c["tag_name"]: current_config.tags[c["tag_name"]]
-                    for c in img_cand_list
-                    if c["tag_name"] in current_config.tags
-                }
-
-                try:
-                    response = tag_image_with_ai(
-                        current_config.ai_model,
-                        img_path,
-                        target_tags,
-                        max_dim=current_config.max_image_dimension,
-                    )
-
-                    conn = get_connection()
-                    try:
-                        t_rows = conn.execute(
-                            "SELECT tag_name FROM image_tags WHERE image_id = ?", (img_id,)
-                        ).fetchall()
-                        current_exif_tags = {tr["tag_name"].lower() for tr in t_rows}
-                    finally:
-                        conn.close()
-
-                    # Map raw model results to target_tags with sanitization
-                    cleaned_results: dict[str, Any] = {}
-                    for tr in response.results:
-                        raw_name = str(tr.tag_name).strip().strip("'\"`_*#[]:").lower()
-                        matched_key = None
-                        if raw_name in target_tags:
-                            matched_key = raw_name
-                        else:
-                            for target_k in target_tags:
-                                if target_k == raw_name or target_k in raw_name or raw_name in target_k:
-                                    matched_key = target_k
-                                    break
-                        if matched_key:
-                            cleaned_results[matched_key] = tr
-
-                    # For any requested candidate tag omitted by the model response, record as not matched
-                    from exif_tagger.models.schema import TagResult
-
-                    for target_k in target_tags:
-                        if target_k not in cleaned_results:
-                            cleaned_results[target_k] = TagResult(
-                                tag_name=target_k,
-                                score=0.0,
-                                reason="Not identified by vision model",
-                            )
-
-                    # 1. Identify which tags exceeded threshold in this response
-                    matched_in_response = []
-                    for t_name, tr in cleaned_results.items():
-                        tag_def = current_config.tags.get(t_name)
-                        if tag_def is not None and tr.score >= tag_def.threshold:
-                            matched_in_response.append((t_name, tr))
-
-                    # 2. Check hallucination overflow guardrail
-                    guardrail_cfg = getattr(current_config, "guardrails", None)
-                    max_matched = guardrail_cfg.max_matched_tags if guardrail_cfg else 2
-                    guardrail_enabled = guardrail_cfg.enabled if guardrail_cfg else True
-                    on_overflow = (guardrail_cfg.on_overflow if guardrail_cfg else "suppress").lower()
-
-                    if guardrail_enabled and len(matched_in_response) > max_matched:
-                        matched_names = [t_name for t_name, _ in matched_in_response]
-                        if on_overflow == "suppress":
-                            logger.warning(
-                                "⚠️ Hallucination guardrail triggered on %s: %d tags matched (%s > max %d). Suppressing EXIF write.",
-                                img_path.name,
-                                len(matched_in_response),
-                                matched_names,
-                                max_matched,
-                            )
-                            tags_to_apply = set()
-                        elif on_overflow == "top_k":
-                            sorted_by_score = sorted(matched_in_response, key=lambda x: x[1].score, reverse=True)
-                            kept = sorted_by_score[:max_matched]
-                            tags_to_apply = {t_name for t_name, _ in kept}
-                            logger.warning(
-                                "⚠️ Hallucination guardrail triggered on %s: %d tags matched (%s > max %d). Keeping top %d by score: %s.",
-                                img_path.name,
-                                len(matched_in_response),
-                                matched_names,
-                                max_matched,
-                                max_matched,
-                                [t_name for t_name, _ in kept],
-                            )
-                        else:  # "warn"
-                            logger.warning(
-                                "⚠️ Hallucination guardrail warning on %s: %d tags matched (%s > max %d).",
-                                img_path.name,
-                                len(matched_in_response),
-                                matched_names,
-                                max_matched,
-                            )
-                            tags_to_apply = {t_name for t_name, _ in matched_in_response}
-                    else:
-                        tags_to_apply = {t_name for t_name, _ in matched_in_response}
-
-                    newly_matched = False
-                    for t_name, tr in cleaned_results.items():
-                        desc_hash = current_tag_hashes.get(t_name, "")
-                        is_match = t_name in tags_to_apply
-
-                        status_str = "matched" if is_match else "not_matched"
-
-                        record_tag_evaluation(
-                            image_id=img_id,
-                            tag_name=t_name,
-                            description_hash=desc_hash,
-                            status=status_str,
-                            score=tr.score,
-                            reason=tr.reason,
-                            model_name=getattr(current_config.ai_model, "model_name", "vision_model"),
-                            image_mtime=img_mtime,
+                    img_cand_list = images_candidates_map.get(str(img_path), [])
+                    if not img_cand_list:
+                        payload = PreparedPayload(
+                            img_path=img_path,
+                            img_cand_list=[],
+                            img_id=0,
+                            img_mtime=0.0,
+                            target_tags={},
+                            prompt="",
                         )
+                    else:
+                        img_id = img_cand_list[0]["image_id"]
+                        img_mtime = img_cand_list[0]["image_mtime"]
+                        current_config = self._config or config
 
-                        if is_match:
-                            current_exif_tags.add(t_name)
-                            newly_matched = True
+                        target_tags = {
+                            c["tag_name"]: current_config.tags[c["tag_name"]]
+                            for c in img_cand_list
+                            if c["tag_name"] in current_config.tags
+                        }
 
-                    if newly_matched:
-                        sorted_tags = sorted(current_exif_tags)
-                        modified = set_xptags(img_path, sorted_tags)
+                        if not target_tags:
+                            payload = PreparedPayload(
+                                img_path=img_path,
+                                img_cand_list=img_cand_list,
+                                img_id=img_id,
+                                img_mtime=img_mtime,
+                                target_tags={},
+                                prompt="",
+                            )
+                        else:
+                            try:
+                                fmt = getattr(current_config.ai_model, "image_format", "jpeg")
+                                quality = getattr(current_config.ai_model, "image_quality", 80)
+                                max_dim = current_config.max_image_dimension
+                                image_b64 = _image_to_base64(img_path, max_dim=max_dim, fmt=fmt, quality=quality)
+                                mime_type = "image/webp" if fmt.lower() == "webp" else "image/jpeg"
+                                use_so = getattr(current_config.ai_model, "use_structured_outputs", False)
+                                prompt = _build_prompt(target_tags, use_structured_outputs=use_so)
 
-                        # Fetch updated file mtime after EXIF write and sync DB records
-                        new_mtime = img_path.stat().st_mtime if img_path.exists() else img_mtime
+                                payload = PreparedPayload(
+                                    img_path=img_path,
+                                    img_cand_list=img_cand_list,
+                                    img_id=img_id,
+                                    img_mtime=img_mtime,
+                                    target_tags=target_tags,
+                                    prompt=prompt,
+                                    image_b64=image_b64,
+                                    mime_type=mime_type,
+                                )
+                            except Exception as exc:
+                                payload = PreparedPayload(
+                                    img_path=img_path,
+                                    img_cand_list=img_cand_list,
+                                    img_id=img_id,
+                                    img_mtime=img_mtime,
+                                    target_tags=target_tags,
+                                    prompt="",
+                                    error=exc,
+                                )
 
-                        from datetime import UTC, datetime
+                    while not self.state.stop_requested:
+                        self.state.wait_if_paused()
+                        if self.state.stop_requested:
+                            break
+                        try:
+                            prefetch_queue.put(payload, timeout=0.1)
+                            break
+                        except queue.Full:
+                            continue
 
-                        now_iso = datetime.now(UTC).isoformat()
+            def ai_inference_worker() -> None:
+                from exif_tagger.models.schema import TagResult
+
+                while not self.state.stop_requested:
+                    self.state.wait_if_paused()
+                    if self.state.stop_requested:
+                        break
+
+                    try:
+                        payload = prefetch_queue.get(timeout=0.1)
+                    except queue.Empty:
+                        continue
+
+                    if payload is _PREFETCH_SENTINEL:
+                        prefetch_queue.put(_PREFETCH_SENTINEL)
+                        break
+
+                    if not isinstance(payload, PreparedPayload):
+                        continue
+
+                    if self.verbose:
+                        logger.info("Processing: %s", payload.img_path.name)
+
+                    if payload.error is not None:
+                        write_task = WriteTask(
+                            img_path=payload.img_path,
+                            img_cand_list=payload.img_cand_list,
+                            img_id=payload.img_id,
+                            img_mtime=payload.img_mtime,
+                            cleaned_results={},
+                            tags_to_apply=set(),
+                            current_exif_tags=set(),
+                            is_match=False,
+                            error=payload.error,
+                        )
+                        write_queue.put(write_task)
+                        continue
+
+                    if not payload.target_tags:
+                        write_task = WriteTask(
+                            img_path=payload.img_path,
+                            img_cand_list=payload.img_cand_list,
+                            img_id=payload.img_id,
+                            img_mtime=payload.img_mtime,
+                            cleaned_results={},
+                            tags_to_apply=set(),
+                            current_exif_tags=set(),
+                            is_match=False,
+                        )
+                        write_queue.put(write_task)
+                        continue
+
+                    try:
+                        current_config = self._config or config
+                        try:
+                            response = tag_image_with_ai(
+                                current_config.ai_model,
+                                payload.img_path,
+                                payload.target_tags,
+                                max_dim=current_config.max_image_dimension,
+                                image_b64=payload.image_b64,
+                                prompt=payload.prompt,
+                                mime_type=payload.mime_type,
+                            )
+                        except TypeError as te:
+                            if "unexpected keyword argument" in str(te) or "takes" in str(te):
+                                response = tag_image_with_ai(
+                                    current_config.ai_model,
+                                    payload.img_path,
+                                    payload.target_tags,
+                                    max_dim=current_config.max_image_dimension,
+                                )
+                            else:
+                                raise
+
                         conn = get_connection()
                         try:
-                            with conn:
-                                conn.execute(
-                                    "UPDATE images SET last_modified = ?, exif_mtime = ? WHERE id = ?",
-                                    (new_mtime, new_mtime, img_id),
-                                )
-                                conn.execute(
-                                    "UPDATE tag_evaluations SET image_mtime = ? WHERE image_id = ?",
-                                    (new_mtime, img_id),
-                                )
-                                conn.execute("DELETE FROM image_tags WHERE image_id = ?", (img_id,))
-                                for t in sorted_tags:
-                                    conn.execute(
-                                        "INSERT OR IGNORE INTO image_tags (image_id, tag_name, source, added_at) VALUES (?, ?, 'model', ?)",
-                                        (img_id, t, now_iso),
-                                    )
+                            t_rows = conn.execute(
+                                "SELECT tag_name FROM image_tags WHERE image_id = ?", (payload.img_id,)
+                            ).fetchall()
+                            current_exif_tags = {tr["tag_name"].lower() for tr in t_rows}
                         finally:
                             conn.close()
 
-                        if modified:
+                        # Map raw model results to target_tags with sanitization
+                        cleaned_results: dict[str, Any] = {}
+                        for tr in response.results:
+                            raw_name = str(tr.tag_name).strip().strip("'\"`_*#[]:").lower()
+                            matched_key = None
+                            if raw_name in payload.target_tags:
+                                matched_key = raw_name
+                            else:
+                                for target_k in payload.target_tags:
+                                    if target_k == raw_name or target_k in raw_name or raw_name in target_k:
+                                        matched_key = target_k
+                                        break
+                            if matched_key:
+                                cleaned_results[matched_key] = tr
+
+                        # For any requested candidate tag omitted by the model response, record as not matched
+                        for target_k in payload.target_tags:
+                            if target_k not in cleaned_results:
+                                cleaned_results[target_k] = TagResult(
+                                    tag_name=target_k,
+                                    score=0.0,
+                                    reason="Not identified by vision model",
+                                )
+
+                        # 1. Identify which tags exceeded threshold in this response
+                        matched_in_response = []
+                        for t_name, tr in cleaned_results.items():
+                            tag_def = current_config.tags.get(t_name)
+                            if tag_def is not None and tr.score >= tag_def.threshold:
+                                matched_in_response.append((t_name, tr))
+
+                        # 2. Check hallucination overflow guardrail
+                        guardrail_cfg = getattr(current_config, "guardrails", None)
+                        max_matched = guardrail_cfg.max_matched_tags if guardrail_cfg else 2
+                        guardrail_enabled = guardrail_cfg.enabled if guardrail_cfg else True
+                        on_overflow = (guardrail_cfg.on_overflow if guardrail_cfg else "suppress").lower()
+
+                        if guardrail_enabled and len(matched_in_response) > max_matched:
+                            matched_names = [t_name for t_name, _ in matched_in_response]
+                            if on_overflow == "suppress":
+                                logger.warning(
+                                    "⚠️ Hallucination guardrail triggered on %s: %d tags matched (%s > max %d). Suppressing EXIF write.",
+                                    payload.img_path.name,
+                                    len(matched_in_response),
+                                    matched_names,
+                                    max_matched,
+                                )
+                                tags_to_apply = set()
+                            elif on_overflow == "top_k":
+                                sorted_by_score = sorted(matched_in_response, key=lambda x: x[1].score, reverse=True)
+                                kept = sorted_by_score[:max_matched]
+                                tags_to_apply = {t_name for t_name, _ in kept}
+                                logger.warning(
+                                    "⚠️ Hallucination guardrail triggered on %s: %d tags matched (%s > max %d). Keeping top %d by score: %s.",
+                                    payload.img_path.name,
+                                    len(matched_in_response),
+                                    matched_names,
+                                    max_matched,
+                                    max_matched,
+                                    [t_name for t_name, _ in kept],
+                                )
+                            else:  # "warn"
+                                logger.warning(
+                                    "⚠️ Hallucination guardrail warning on %s: %d tags matched (%s > max %d).",
+                                    payload.img_path.name,
+                                    len(matched_in_response),
+                                    matched_names,
+                                    max_matched,
+                                )
+                                tags_to_apply = {t_name for t_name, _ in matched_in_response}
+                        else:
+                            tags_to_apply = {t_name for t_name, _ in matched_in_response}
+
+                        is_match = any(t_name in tags_to_apply for t_name in cleaned_results)
+
+                        write_task = WriteTask(
+                            img_path=payload.img_path,
+                            img_cand_list=payload.img_cand_list,
+                            img_id=payload.img_id,
+                            img_mtime=payload.img_mtime,
+                            cleaned_results=cleaned_results,
+                            tags_to_apply=tags_to_apply,
+                            current_exif_tags=current_exif_tags,
+                            is_match=is_match,
+                            error=None,
+                        )
+                    except Exception as exc:
+                        write_task = WriteTask(
+                            img_path=payload.img_path,
+                            img_cand_list=payload.img_cand_list,
+                            img_id=payload.img_id,
+                            img_mtime=payload.img_mtime,
+                            cleaned_results={},
+                            tags_to_apply=set(),
+                            current_exif_tags=set(),
+                            is_match=False,
+                            error=exc,
+                        )
+
+                    write_queue.put(write_task)
+
+            def writer_worker() -> None:
+                nonlocal successfully_tagged, failed_count
+                from datetime import UTC, datetime
+
+                while True:
+                    self.state.wait_if_paused()
+                    if self.state.stop_requested and write_queue.empty():
+                        break
+
+                    try:
+                        task = write_queue.get(timeout=0.1)
+                    except queue.Empty:
+                        if self.state.stop_requested:
+                            break
+                        continue
+
+                    if task is _WRITE_SENTINEL:
+                        break
+
+                    if not isinstance(task, WriteTask):
+                        continue
+
+                    try:
+                        if task.error is not None:
                             with counters_lock:
-                                successfully_tagged += 1
+                                failed_count += 1
+                                errors.append(f"{task.img_path.name}: {task.error}")
+                            logger.error("Failed to process %s: %s", task.img_path.name, task.error)
+                        elif not task.cleaned_results:
+                            pass
+                        else:
+                            current_config = self._config or config
+                            current_tag_hashes = getattr(self, "_live_tag_hashes", tag_hashes) or tag_hashes
+                            newly_matched = False
 
-                except Exception as exc:
-                    with counters_lock:
-                        failed_count += 1
-                        errors.append(f"{img_path.name}: {exc}")
-                    logger.error("Failed to process %s: %s", img_path.name, exc)
+                            for t_name, tr in task.cleaned_results.items():
+                                desc_hash = current_tag_hashes.get(t_name, "")
+                                is_match = t_name in task.tags_to_apply
+                                status_str = "matched" if is_match else "not_matched"
 
-                self.state.update_progress(img_path.name)
+                                record_tag_evaluation(
+                                    image_id=task.img_id,
+                                    tag_name=t_name,
+                                    description_hash=desc_hash,
+                                    status=status_str,
+                                    score=tr.score,
+                                    reason=tr.reason,
+                                    model_name=getattr(current_config.ai_model, "model_name", "vision_model"),
+                                    image_mtime=task.img_mtime,
+                                )
+
+                                if is_match:
+                                    task.current_exif_tags.add(t_name)
+                                    newly_matched = True
+
+                            if newly_matched:
+                                sorted_tags = sorted(task.current_exif_tags)
+                                modified = set_xptags(task.img_path, sorted_tags)
+
+                                # Fetch updated file mtime after EXIF write and sync DB records
+                                new_mtime = task.img_path.stat().st_mtime if task.img_path.exists() else task.img_mtime
+
+                                now_iso = datetime.now(UTC).isoformat()
+                                conn = get_connection()
+                                try:
+                                    with conn:
+                                        conn.execute(
+                                            "UPDATE images SET last_modified = ?, exif_mtime = ? WHERE id = ?",
+                                            (new_mtime, new_mtime, task.img_id),
+                                        )
+                                        conn.execute(
+                                            "UPDATE tag_evaluations SET image_mtime = ? WHERE image_id = ?",
+                                            (new_mtime, task.img_id),
+                                        )
+                                        conn.execute("DELETE FROM image_tags WHERE image_id = ?", (task.img_id,))
+                                        for t in sorted_tags:
+                                            conn.execute(
+                                                "INSERT OR IGNORE INTO image_tags (image_id, tag_name, source, added_at) VALUES (?, ?, 'model', ?)",
+                                                (task.img_id, t, now_iso),
+                                            )
+                                finally:
+                                    conn.close()
+
+                                if modified:
+                                    with counters_lock:
+                                        successfully_tagged += 1
+
+                    except Exception as exc:
+                        with counters_lock:
+                            failed_count += 1
+                            errors.append(f"{task.img_path.name}: {exc}")
+                        logger.error("Failed in writer for %s: %s", task.img_path.name, exc)
+                    finally:
+                        self.state.update_progress(task.img_path.name)
+
+            prefetch_thread = threading.Thread(target=prefetch_worker, name="PrefetchWorker")
+            writer_thread = threading.Thread(target=writer_worker, name="WriterWorker")
+
+            prefetch_thread.start()
+            writer_thread.start()
 
             with ThreadPoolExecutor(max_workers=concurrency) as executor:
-                futures = {executor.submit(process_image, p): p for p in images_to_process}
-                for future in as_completed(futures):
-                    if self.state.stop_requested:
-                        # Cancel pending futures (already-running ones finish naturally)
-                        for f in futures:
-                            f.cancel()
-                        break
-                    # Propagate unexpected exceptions from the worker
-                    exc = future.exception()
-                    if exc:
+                inference_futures = [executor.submit(ai_inference_worker) for _ in range(concurrency)]
+
+                prefetch_thread.join()
+
+                for _ in range(concurrency):
+                    prefetch_queue.put(_PREFETCH_SENTINEL)
+
+                for future in inference_futures:
+                    try:
+                        future.result()
+                    except Exception as exc:
                         logger.error("Unexpected worker error: %s", exc)
+
+                write_queue.put(_WRITE_SENTINEL)
+                writer_thread.join()
 
             summary = {
                 "root_directory": config.root_directory,

@@ -133,6 +133,13 @@ export function useProcessing() {
 
       // Append new logs sequentially
       if (data.logs && Array.isArray(data.logs)) {
+        if (data.logs.length > 0) {
+          const maxLogId = Math.max(...data.logs.map((l) => l.id));
+          if (maxLogId < lastProcessedLogIdRef.current) {
+            lastProcessedLogIdRef.current = 0;
+          }
+        }
+
         const newLogs: LogItem[] = [];
         data.logs.forEach((log) => {
           if (log.id > lastProcessedLogIdRef.current) {
@@ -269,7 +276,6 @@ export function useProcessing() {
 
   const clearLogs = useCallback(() => {
     setLogs([]);
-    lastProcessedLogIdRef.current = 0;
   }, []);
 
   const fetchFolders = useCallback(async (path = '') => {

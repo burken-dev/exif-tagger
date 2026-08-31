@@ -281,6 +281,70 @@ def test_processing_pause_and_resume_button_actions(browser_page: Page):
     assert len(resume_called) == 1, "Expected /api/resume to be called"
 
 
+def test_processing_clear_log_persists_on_update(browser_page: Page):
+    """Clicking Clear Log clears the view and subsequent status updates do not re-add old logs, only new ones."""
+    import json
+
+    current_status = {
+        "running": True,
+        "paused": False,
+        "processed": 2,
+        "total": 10,
+        "currentImage": "image_002.jpg",
+        "progressPct": 20.0,
+        "stopRequested": False,
+        "logs": [
+            {"id": 1, "text": "Starting processing batch 1", "level": "info"},
+            {"id": 2, "text": "Processing image_001.jpg", "level": "info"},
+        ],
+        "summary": None,
+    }
+
+    def handle_status(route):
+        route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps(current_status),
+        )
+
+    browser_page.route("**/api/status", handle_status)
+    browser_page.reload(wait_until="networkidle")
+
+    # Verify initial logs are visible
+    page_content = browser_page.content()
+    assert "Starting processing batch 1" in page_content
+    assert "Processing image_001.jpg" in page_content
+
+    # Click Clear Log
+    clear_btn = browser_page.locator("button").filter(has_text="Clear Log")
+    clear_btn.wait_for(state="visible")
+    assert clear_btn.is_enabled()
+    clear_btn.click()
+
+    # Wait for React state update
+    browser_page.wait_for_timeout(300)
+    html_after_clear = browser_page.content()
+    assert "Starting processing batch 1" not in html_after_clear
+    assert "Processing image_001.jpg" not in html_after_clear
+    assert "No logs captured yet" in html_after_clear
+
+    # Wait for the next poll cycle (1000ms poll interval when running) with the same logs (ids 1 & 2)
+    browser_page.wait_for_timeout(1500)
+    html_after_poll = browser_page.content()
+    assert "Starting processing batch 1" not in html_after_poll, "Old log row 1 should not reappear on next update"
+    assert "Processing image_001.jpg" not in html_after_poll, "Old log row 2 should not reappear on next update"
+
+    # Add a new log row (id: 3)
+    current_status["logs"].append({"id": 3, "text": "Processing image_002.jpg", "level": "info"})
+
+    # Wait for poll cycle to pick up the new log
+    browser_page.wait_for_timeout(1500)
+    html_after_new_log = browser_page.content()
+    assert "Processing image_002.jpg" in html_after_new_log, "New log row 3 should appear in log view"
+    assert "Starting processing batch 1" not in html_after_new_log, "Old log row 1 should still not be present"
+    assert "Processing image_001.jpg" not in html_after_new_log, "Old log row 2 should still not be present"
+
+
 # ---------------------------------------------------------------------------
 # Gallery tab
 # ---------------------------------------------------------------------------

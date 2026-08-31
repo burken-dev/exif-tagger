@@ -352,12 +352,16 @@ def _call_vision_api(
     image_path: Path,
     prompt: str,
     max_dim: int = MAX_IMAGE_DIMENSION,
+    image_b64: str | None = None,
+    mime_type: str | None = None,
 ) -> str:
     """Call the vision API with retries. Raises on persistent failure."""
     fmt = getattr(model_config, "image_format", "jpeg")
     quality = getattr(model_config, "image_quality", 80)
-    image_b64 = _image_to_base64(image_path, max_dim=max_dim, fmt=fmt, quality=quality)
-    mime_type = "image/webp" if fmt == "webp" else "image/jpeg"
+    if image_b64 is None:
+        image_b64 = _image_to_base64(image_path, max_dim=max_dim, fmt=fmt, quality=quality)
+    if mime_type is None:
+        mime_type = "image/webp" if fmt.lower() == "webp" else "image/jpeg"
 
     # Extract system_prompt and user_prompt from params if present
     params_copy = dict(model_config.params or {})
@@ -484,16 +488,27 @@ def tag_image_with_ai(
     image_path: Path,
     tag_definitions: dict[str, TagDefinition],
     max_dim: int = MAX_IMAGE_DIMENSION,
+    image_b64: str | None = None,
+    prompt: str | None = None,
+    mime_type: str | None = None,
 ) -> TaggingResponse:
     if not tag_definitions:
         logger.debug("No tags defined – skipping AI call for %s", image_path.name)
         return TaggingResponse(results=[])
 
-    use_so = getattr(model_config, "use_structured_outputs", False)  # type: ignore[attr-defined]
-    prompt = _build_prompt(tag_definitions, use_structured_outputs=use_so)
+    if prompt is None:
+        use_so = getattr(model_config, "use_structured_outputs", False)  # type: ignore[attr-defined]
+        prompt = _build_prompt(tag_definitions, use_structured_outputs=use_so)
 
     # Call with retry logic
-    raw_response = _call_vision_api(model_config, image_path, prompt, max_dim=max_dim)
+    raw_response = _call_vision_api(
+        model_config,
+        image_path,
+        prompt,
+        max_dim=max_dim,
+        image_b64=image_b64,
+        mime_type=mime_type,
+    )
 
     # Parse the response
     try:

@@ -995,3 +995,293 @@ class TestCLIEntryPoints:
 
         assert "Errors:" in text
         assert "timeout" in text
+
+
+class TestPipelineEngine3Stage:
+    """Tests specifically targeting the 3-stage decoupled pipeline (Prefetch -> Inference -> Writer)."""
+
+    def test_pipeline_engine_3_stage_execution_completes_all_images(self, tmp_path):
+        import yaml
+        from PIL import Image
+        from unittest.mock import MagicMock, patch
+        from exif_tagger.main import PipelineEngine
+        from exif_tagger.models.schema import TagResult
+        from exif_tagger.db import get_gallery_images
+
+        images_dir = tmp_path / "stage_images"
+        images_dir.mkdir(exist_ok=True)
+        img_paths = []
+        for i in range(6):
+            p = images_dir / f"test_{i}.jpg"
+            Image.new("RGB", (40, 40), color=(i * 30, 100, 150)).save(p, format="JPEG")
+            img_paths.append(p)
+
+        db_path = tmp_path / "stage_test.db"
+
+        cfg_file = tmp_path / "config.yaml"
+        cfg = {
+            "root_directory": str(images_dir),
+            "model": {
+                "base_url": "https://api.openai.com/v1",
+                "model_name": "gpt-4o-mini",
+                "api_key": "test-key",
+                "concurrency": 3,
+            },
+            "tags": {"sunset": {"description": "A beautiful sunset", "threshold": 0.6}},
+        }
+        cfg_file.write_text(yaml.safe_dump(cfg))
+
+        mock_response = MagicMock()
+        mock_response.results = [TagResult(tag_name="sunset", score=0.95)]
+
+        with patch("exif_tagger.ai_client.setup_secure_logging"):
+            with patch("exif_tagger.ai_client.tag_image_with_ai", return_value=mock_response) as mock_tag:
+                with patch("exif_tagger.exif_writer.set_xptags", return_value=True):
+                    with patch("exif_tagger.db.get_db_path", return_value=db_path):
+                        engine = PipelineEngine(config_path=str(cfg_file))
+                        summary = engine.start_session(root_directory=str(images_dir))
+
+        assert summary["total_images_found"] == 6
+        assert summary["total_processed"] == 6
+        assert summary["successfully_tagged"] == 6
+        assert summary["failed"] == 0
+        assert len(summary["errors"]) == 0
+        assert engine.state.running is False
+
+        images, total = get_gallery_images(db_path=db_path)
+        assert total == 6
+        for img in images:
+            assert "sunset" in img["tags"]
+
+    def test_pipeline_engine_3_stage_pause_and_resume(self, tmp_path):
+        import time
+        import yaml
+        from PIL import Image
+        from unittest.mock import MagicMock, patch
+        from exif_tagger.main import PipelineEngine
+        from exif_tagger.models.schema import TagResult
+
+        images_dir = tmp_path / "stage_pause_images"
+        images_dir.mkdir(exist_ok=True)
+        for i in range(4):
+            p = images_dir / f"pause_{i}.jpg"
+            Image.new("RGB", (30, 30), color="blue").save(p, format="JPEG")
+
+        db_path = tmp_path / "stage_pause.db"
+        cfg_file = tmp_path / "config.yaml"
+        cfg = {
+            "root_directory": str(images_dir),
+            "model": {
+                "base_url": "https://api.openai.com/v1",
+                "model_name": "model-v1",
+                "api_key": "test",
+                "concurrency": 1,
+            },
+            "tags": {"tag1": {"description": "tag one", "threshold": 0.5}},
+        }
+        cfg_file.write_text(yaml.safe_dump(cfg))
+
+        engine = PipelineEngine(config_path=str(cfg_file))
+        calls = []
+        paused_event = threading.Event()
+
+        def fake_tag(ai_model, path, target_tags, **kwargs):
+            calls.append(path.name)
+            if len(calls) == 1:
+                engine.pause()
+                paused_event.set()
+            return MagicMock(results=[TagResult(tag_name="tag1", score=0.8)])
+
+        result_box = {}
+
+        def run_thread():
+            with patch("exif_tagger.ai_client.setup_secure_logging"):
+                with patch("exif_tagger.ai_client.tag_image_with_ai", side_effect=fake_tag):
+                    with patch("exif_tagger.exif_writer.set_xptags", return_value=True):
+                        with patch("exif_tagger.db.get_db_path", return_value=db_path):
+                            result_box["summary"] = engine.start_session(root_directory=str(images_dir))
+
+        t = threading.Thread(target=run_thread)
+        t.start()
+
+        assert paused_event.wait(timeout=3.0)
+        time.sleep(0.15)
+        assert engine.state.paused is True
+        assert len(calls) == 1
+
+        engine.resume()
+        t.join(timeout=5.0)
+        assert not t.is_alive()
+        assert len(calls) == 4
+        assert result_box["summary"]["successfully_tagged"] == 4
+        assert engine.state.running is False
+
+    def test_pipeline_engine_3_stage_stop_cancellation(self, tmp_path):
+        import time
+        import yaml
+        from PIL import Image
+        from unittest.mock import MagicMock, patch
+        from exif_tagger.main import PipelineEngine
+        from exif_tagger.models.schema import TagResult
+
+        images_dir = tmp_path / "stage_stop_images"
+        images_dir.mkdir(exist_ok=True)
+        for i in range(8):
+            p = images_dir / f"stop_{i}.jpg"
+            Image.new("RGB", (30, 30), color="green").save(p, format="JPEG")
+
+        db_path = tmp_path / "stage_stop.db"
+        cfg_file = tmp_path / "config.yaml"
+        cfg = {
+            "root_directory": str(images_dir),
+            "model": {
+                "base_url": "https://api.openai.com/v1",
+                "model_name": "model-v1",
+                "api_key": "test",
+                "concurrency": 2,
+            },
+            "tags": {"nature": {"description": "nature scene", "threshold": 0.5}},
+        }
+        cfg_file.write_text(yaml.safe_dump(cfg))
+
+        engine = PipelineEngine(config_path=str(cfg_file))
+        calls = []
+
+        def fake_tag(ai_model, path, target_tags, **kwargs):
+            calls.append(path.name)
+            if len(calls) >= 2:
+                engine.stop()
+            time.sleep(0.05)
+            return MagicMock(results=[TagResult(tag_name="nature", score=0.8)])
+
+        result_box = {}
+
+        def run_thread():
+            with patch("exif_tagger.ai_client.setup_secure_logging"):
+                with patch("exif_tagger.ai_client.tag_image_with_ai", side_effect=fake_tag):
+                    with patch("exif_tagger.exif_writer.set_xptags", return_value=True):
+                        with patch("exif_tagger.db.get_db_path", return_value=db_path):
+                            result_box["summary"] = engine.start_session(root_directory=str(images_dir))
+
+        t = threading.Thread(target=run_thread)
+        t.start()
+        t.join(timeout=5.0)
+
+        assert not t.is_alive(), "Pipeline should terminate quickly when stopped"
+        assert engine.state.stop_requested is True
+        assert engine.state.running is False
+        assert len(calls) < 8
+
+    def test_pipeline_engine_3_stage_handles_prefetch_and_ai_errors(self, tmp_path):
+        import yaml
+        from PIL import Image
+        from unittest.mock import MagicMock, patch
+        from exif_tagger.main import PipelineEngine
+        from exif_tagger.models.schema import TagResult
+
+        images_dir = tmp_path / "stage_err_images"
+        images_dir.mkdir(exist_ok=True)
+        for i in range(3):
+            p = images_dir / f"err_{i}.jpg"
+            Image.new("RGB", (30, 30), color="blue").save(p, format="JPEG")
+
+        db_path = tmp_path / "stage_err.db"
+        cfg_file = tmp_path / "config.yaml"
+        cfg = {
+            "root_directory": str(images_dir),
+            "model": {
+                "base_url": "https://api.openai.com/v1",
+                "model_name": "model-v1",
+                "api_key": "test",
+                "concurrency": 2,
+            },
+            "tags": {"cat": {"description": "A cat", "threshold": 0.5}},
+        }
+        cfg_file.write_text(yaml.safe_dump(cfg))
+
+        def fake_tag(ai_model, path, target_tags, **kwargs):
+            if "err_1.jpg" in path.name:
+                raise RuntimeError("Vision API timeout")
+            return MagicMock(results=[TagResult(tag_name="cat", score=0.9)])
+
+        engine = PipelineEngine(config_path=str(cfg_file))
+        with patch("exif_tagger.ai_client.setup_secure_logging"):
+            with patch("exif_tagger.ai_client.tag_image_with_ai", side_effect=fake_tag):
+                with patch("exif_tagger.exif_writer.set_xptags", return_value=True):
+                    with patch("exif_tagger.db.get_db_path", return_value=db_path):
+                        summary = engine.start_session(root_directory=str(images_dir))
+
+        assert summary["total_processed"] == 3
+        assert summary["successfully_tagged"] == 2
+        assert summary["failed"] == 1
+        assert any("err_1.jpg: Vision API timeout" in err for err in summary["errors"])
+        assert engine.state.running is False
+
+    def test_prepared_payload_and_write_task_dataclasses(self):
+        from pathlib import Path
+        from exif_tagger.main import PreparedPayload, WriteTask
+
+        payload = PreparedPayload(
+            img_path=Path("test.jpg"),
+            img_cand_list=[{"tag_name": "cat"}],
+            img_id=1,
+            img_mtime=123.45,
+            target_tags={"cat": None},
+            prompt="Evaluate cat",
+        )
+        assert payload.img_path == Path("test.jpg")
+        assert payload.image_b64 is None
+        assert payload.mime_type == "image/jpeg"
+        assert payload.error is None
+
+        write_task = WriteTask(
+            img_path=Path("test.jpg"),
+            img_cand_list=[{"tag_name": "cat"}],
+            img_id=1,
+            img_mtime=123.45,
+            cleaned_results={},
+            tags_to_apply={"cat"},
+            current_exif_tags=set(),
+            is_match=True,
+        )
+        assert write_task.img_path == Path("test.jpg")
+        assert write_task.is_match is True
+        assert write_task.error is None
+
+    def test_pipeline_engine_3_stage_handles_corrupt_image_in_prefetch(self, tmp_path):
+        import yaml
+        from unittest.mock import MagicMock, patch
+        from exif_tagger.main import PipelineEngine
+
+        images_dir = tmp_path / "corrupt_images"
+        images_dir.mkdir(exist_ok=True)
+        # Create a corrupt file
+        corrupt_file = images_dir / "corrupt.jpg"
+        corrupt_file.write_bytes(b"NOT_A_VALID_JPEG_HEADER_DATA_12345")
+
+        db_path = tmp_path / "corrupt.db"
+        cfg_file = tmp_path / "config.yaml"
+        cfg = {
+            "root_directory": str(images_dir),
+            "model": {
+                "base_url": "https://api.openai.com/v1",
+                "model_name": "model-v1",
+                "api_key": "test",
+                "concurrency": 1,
+            },
+            "tags": {"cat": {"description": "A cat", "threshold": 0.5}},
+        }
+        cfg_file.write_text(yaml.safe_dump(cfg))
+
+        engine = PipelineEngine(config_path=str(cfg_file))
+        with patch("exif_tagger.ai_client.setup_secure_logging"):
+            with patch("exif_tagger.exif_writer.set_xptags", return_value=True):
+                with patch("exif_tagger.db.get_db_path", return_value=db_path):
+                    summary = engine.start_session(root_directory=str(images_dir))
+
+        assert summary["total_processed"] == 1
+        assert summary["successfully_tagged"] == 0
+        assert summary["failed"] == 1
+        assert len(summary["errors"]) == 1
+        assert "corrupt.jpg" in summary["errors"][0]
+        assert engine.state.running is False

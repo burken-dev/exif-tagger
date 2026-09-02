@@ -182,6 +182,33 @@ class TestParseResponse:
         assert result.results[1].score == 1.0
         assert result.results[2].score == 0.5
 
+    def test_parse_response_empty_results(self):
+        response_str = json.dumps({
+            "scene_description": "A dark empty room with no distinct objects.",
+            "results": []
+        })
+        result = _parse_response(response_str)
+        assert result.scene_description == "A dark empty room with no distinct objects."
+        assert result.results == []
+
+    def test_parse_response_missing_results_key(self):
+        response_str = json.dumps({
+            "scene_description": "An open sky."
+        })
+        result = _parse_response(response_str)
+        assert result.scene_description == "An open sky."
+        assert result.results == []
+
+    def test_parse_response_null_results(self):
+        response_str = json.dumps({
+            "scene_description": "An open sky.",
+            "results": None
+        })
+        result = _parse_response(response_str)
+        assert result.scene_description == "An open sky."
+        assert result.results == []
+
+
 
 class TestTagImageWithAi:
     """Integration test for tag_image_with_ai using mock OpenAI client."""

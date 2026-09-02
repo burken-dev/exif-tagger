@@ -237,7 +237,7 @@ def _parse_response(content: str | bytes) -> TaggingResponse:
             )
         raise ValueError(f"AI did not return valid JSON: {exc}\nResponse: {content[:500]}") from exc
 
-    raw_results = parsed.get("results", [])
+    raw_results = parsed.get("results") or []
     tag_results = []
     for item in raw_results:
         try:

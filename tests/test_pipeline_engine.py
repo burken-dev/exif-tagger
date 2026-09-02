@@ -1210,6 +1210,52 @@ class TestPipelineEngine3Stage:
         assert engine.state.stop_requested is True
         assert engine.state.running is False
         assert len(calls) < 8
+        assert result_box["summary"]["total_processed"] == engine.state.processed
+        assert result_box["summary"]["successfully_tagged"] == len(calls)
+        assert result_box["summary"]["total_processed"] == len(calls)
+
+    def test_pipeline_engine_3_stage_writer_fetches_tags_and_drains_inflight(self, tmp_path):
+        from unittest.mock import MagicMock, patch
+
+        import yaml
+        from PIL import Image
+
+        from exif_tagger.main import PipelineEngine
+        from exif_tagger.models.schema import TagResult
+
+        images_dir = tmp_path / "stage_inflight_images"
+        images_dir.mkdir(exist_ok=True)
+        for i in range(5):
+            p = images_dir / f"inflight_{i}.jpg"
+            Image.new("RGB", (30, 30), color="blue").save(p, format="JPEG")
+
+        db_path = tmp_path / "stage_inflight.db"
+        cfg_file = tmp_path / "config.yaml"
+        cfg = {
+            "root_directory": str(images_dir),
+            "model": {
+                "base_url": "https://api.openai.com/v1",
+                "model_name": "model-v1",
+                "api_key": "test",
+                "concurrency": 2,
+            },
+            "tags": {"sea": {"description": "Sea view", "threshold": 0.5}},
+        }
+        cfg_file.write_text(yaml.safe_dump(cfg))
+
+        def fake_tag(ai_model, path, target_tags, **kwargs):
+            return MagicMock(results=[TagResult(tag_name="sea", score=0.9)])
+
+        engine = PipelineEngine(config_path=str(cfg_file))
+        with patch("exif_tagger.ai_client.setup_secure_logging"):
+            with patch("exif_tagger.ai_client.tag_image_with_ai", side_effect=fake_tag):
+                with patch("exif_tagger.exif_writer.set_xptags", return_value=True):
+                    with patch("exif_tagger.db.get_db_path", return_value=db_path):
+                        summary = engine.start_session(root_directory=str(images_dir))
+
+        assert summary["total_processed"] == 5
+        assert summary["successfully_tagged"] == 5
+        assert summary["failed"] == 0
 
     def test_pipeline_engine_3_stage_handles_prefetch_and_ai_errors(self, tmp_path):
         from unittest.mock import MagicMock, patch
@@ -1328,4 +1374,43 @@ class TestPipelineEngine3Stage:
         assert summary["failed"] == 1
         assert len(summary["errors"]) == 1
         assert "corrupt.jpg" in summary["errors"][0]
+        assert engine.state.running is False
+
+    def test_pipeline_engine_3_stage_handles_unexpected_prefetch_exception(self, tmp_path):
+        from unittest.mock import patch
+
+        import yaml
+        from PIL import Image
+
+        from exif_tagger.main import PipelineEngine
+
+        images_dir = tmp_path / "unexp_images"
+        images_dir.mkdir(exist_ok=True)
+        p = images_dir / "unexp.jpg"
+        Image.new("RGB", (30, 30), color="yellow").save(p, format="JPEG")
+
+        db_path = tmp_path / "unexp.db"
+        cfg_file = tmp_path / "config.yaml"
+        cfg = {
+            "root_directory": str(images_dir),
+            "model": {
+                "base_url": "https://api.openai.com/v1",
+                "model_name": "model-v1",
+                "api_key": "test",
+                "concurrency": 1,
+            },
+            "tags": {"tag": {"description": "tag desc", "threshold": 0.5}},
+        }
+        cfg_file.write_text(yaml.safe_dump(cfg))
+
+        engine = PipelineEngine(config_path=str(cfg_file))
+        with patch("exif_tagger.ai_client.setup_secure_logging"):
+            with patch("exif_tagger.ai_client._image_to_base64", side_effect=OSError("Disk I/O error")):
+                with patch("exif_tagger.db.get_db_path", return_value=db_path):
+                    summary = engine.start_session(root_directory=str(images_dir))
+
+        assert summary["total_processed"] == 1
+        assert summary["successfully_tagged"] == 0
+        assert summary["failed"] == 1
+        assert "Disk I/O error" in summary["errors"][0]
         assert engine.state.running is False

@@ -40,7 +40,7 @@ class WriteTask:
     img_mtime: float
     cleaned_results: dict[str, Any]
     tags_to_apply: set[str]
-    current_exif_tags: set[str]
+    current_exif_tags: set[str] | None = None
     is_match: bool = False
     error: Exception | None = None
 
@@ -535,38 +535,38 @@ class PipelineEngine:
                     if self.state.stop_requested:
                         break
 
-                    img_cand_list = images_candidates_map.get(str(img_path), [])
-                    if not img_cand_list:
-                        payload = PreparedPayload(
-                            img_path=img_path,
-                            img_cand_list=[],
-                            img_id=0,
-                            img_mtime=0.0,
-                            target_tags={},
-                            prompt="",
-                        )
-                    else:
-                        img_id = img_cand_list[0]["image_id"]
-                        img_mtime = img_cand_list[0]["image_mtime"]
-                        current_config = self._config or config
-
-                        target_tags = {
-                            c["tag_name"]: current_config.tags[c["tag_name"]]
-                            for c in img_cand_list
-                            if c["tag_name"] in current_config.tags
-                        }
-
-                        if not target_tags:
+                    try:
+                        img_cand_list = images_candidates_map.get(str(img_path), [])
+                        if not img_cand_list:
                             payload = PreparedPayload(
                                 img_path=img_path,
-                                img_cand_list=img_cand_list,
-                                img_id=img_id,
-                                img_mtime=img_mtime,
+                                img_cand_list=[],
+                                img_id=0,
+                                img_mtime=0.0,
                                 target_tags={},
                                 prompt="",
                             )
                         else:
-                            try:
+                            img_id = img_cand_list[0]["image_id"]
+                            img_mtime = img_cand_list[0]["image_mtime"]
+                            current_config = self._config or config
+
+                            target_tags = {
+                                c["tag_name"]: current_config.tags[c["tag_name"]]
+                                for c in img_cand_list
+                                if c["tag_name"] in current_config.tags
+                            }
+
+                            if not target_tags:
+                                payload = PreparedPayload(
+                                    img_path=img_path,
+                                    img_cand_list=img_cand_list,
+                                    img_id=img_id,
+                                    img_mtime=img_mtime,
+                                    target_tags={},
+                                    prompt="",
+                                )
+                            else:
                                 fmt = getattr(current_config.ai_model, "image_format", "jpeg")
                                 quality = getattr(current_config.ai_model, "image_quality", 80)
                                 max_dim = current_config.max_image_dimension
@@ -585,16 +585,16 @@ class PipelineEngine:
                                     image_b64=image_b64,
                                     mime_type=mime_type,
                                 )
-                            except Exception as exc:
-                                payload = PreparedPayload(
-                                    img_path=img_path,
-                                    img_cand_list=img_cand_list,
-                                    img_id=img_id,
-                                    img_mtime=img_mtime,
-                                    target_tags=target_tags,
-                                    prompt="",
-                                    error=exc,
-                                )
+                    except Exception as exc:
+                        payload = PreparedPayload(
+                            img_path=img_path,
+                            img_cand_list=images_candidates_map.get(str(img_path), []),
+                            img_id=0,
+                            img_mtime=0.0,
+                            target_tags={},
+                            prompt="",
+                            error=exc,
+                        )
 
                     while not self.state.stop_requested:
                         self.state.wait_if_paused()
@@ -681,15 +681,6 @@ class PipelineEngine:
                             else:
                                 raise
 
-                        conn = get_connection()
-                        try:
-                            t_rows = conn.execute(
-                                "SELECT tag_name FROM image_tags WHERE image_id = ?", (payload.img_id,)
-                            ).fetchall()
-                            current_exif_tags = {tr["tag_name"].lower() for tr in t_rows}
-                        finally:
-                            conn.close()
-
                         # Map raw model results to target_tags with sanitization
                         cleaned_results: dict[str, Any] = {}
                         for tr in response.results:
@@ -772,7 +763,7 @@ class PipelineEngine:
                             img_mtime=payload.img_mtime,
                             cleaned_results=cleaned_results,
                             tags_to_apply=tags_to_apply,
-                            current_exif_tags=current_exif_tags,
+                            current_exif_tags=None,
                             is_match=is_match,
                             error=None,
                         )
@@ -784,7 +775,7 @@ class PipelineEngine:
                             img_mtime=payload.img_mtime,
                             cleaned_results={},
                             tags_to_apply=set(),
-                            current_exif_tags=set(),
+                            current_exif_tags=None,
                             is_match=False,
                             error=exc,
                         )
@@ -797,14 +788,10 @@ class PipelineEngine:
 
                 while True:
                     self.state.wait_if_paused()
-                    if self.state.stop_requested and write_queue.empty():
-                        break
 
                     try:
                         task = write_queue.get(timeout=0.1)
                     except queue.Empty:
-                        if self.state.stop_requested:
-                            break
                         continue
 
                     if task is _WRITE_SENTINEL:
@@ -843,11 +830,26 @@ class PipelineEngine:
                                 )
 
                                 if is_match:
-                                    task.current_exif_tags.add(t_name)
                                     newly_matched = True
 
                             if newly_matched:
-                                sorted_tags = sorted(task.current_exif_tags)
+                                current_tags: set[str]
+                                if task.current_exif_tags is not None:
+                                    current_tags = set(task.current_exif_tags)
+                                else:
+                                    conn = get_connection()
+                                    try:
+                                        t_rows = conn.execute(
+                                            "SELECT tag_name FROM image_tags WHERE image_id = ?", (task.img_id,)
+                                        ).fetchall()
+                                        current_tags = {tr["tag_name"].lower() for tr in t_rows}
+                                    finally:
+                                        conn.close()
+
+                                for t_name in task.tags_to_apply:
+                                    current_tags.add(t_name)
+
+                                sorted_tags = sorted(current_tags)
                                 modified = set_xptags(task.img_path, sorted_tags)
 
                                 # Fetch updated file mtime after EXIF write and sync DB records
@@ -912,7 +914,7 @@ class PipelineEngine:
             summary = {
                 "root_directory": config.root_directory,
                 "total_images_found": total_found,
-                "total_processed": len(images_to_process),
+                "total_processed": self.state.processed,
                 "successfully_tagged": successfully_tagged,
                 "already_tagged": total_found - len(images_to_process),
                 "skipped_by_checkpoint": total_found - len(images_to_process),

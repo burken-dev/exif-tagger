@@ -133,11 +133,13 @@ export function useProcessing() {
         }
       }
 
-      if (typeof data.elapsedSeconds === 'number') {
-        setElapsedSeconds(data.elapsedSeconds);
+      const elapsed = typeof data.elapsedSeconds === 'number' ? data.elapsedSeconds : data.elapsed_seconds;
+      if (typeof elapsed === 'number') {
+        setElapsedSeconds(elapsed);
       }
-      if (typeof data.avgSecondsPerImage === 'number') {
-        setAvgSecondsPerImage(data.avgSecondsPerImage);
+      const avgTime = typeof data.avgSecondsPerImage === 'number' ? data.avgSecondsPerImage : data.avg_seconds_per_image;
+      if (typeof avgTime === 'number') {
+        setAvgSecondsPerImage(avgTime);
       }
 
       // Append new logs sequentially

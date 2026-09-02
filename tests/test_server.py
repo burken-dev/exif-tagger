@@ -293,6 +293,7 @@ exclude_patterns: []
                     "image_format": "jpeg",
                     "image_quality": 75,
                     "concurrency": 2,
+                    "temperature": 0.0,
                     "params": {
                         "reasoning_effort": "minimal_custom",
                     },
@@ -310,6 +311,7 @@ exclude_patterns: []
             assert data_after["model"]["image_format"] == "jpeg"
             assert data_after["model"]["image_quality"] == 75
             assert data_after["model"]["concurrency"] == 2
+            assert data_after["model"]["temperature"] == 0.0
             assert data_after["model"]["params"]["reasoning_effort"] == "minimal_custom"
             assert data_after["log_level"] == "WARNING"
         finally:

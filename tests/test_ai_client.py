@@ -58,6 +58,20 @@ class TestBuildPrompt:
         assert "tag_name" in prompt
         assert "score" in prompt
 
+    def test_build_prompt_sparse_instructions(self):
+        tags = {
+            "landscape": TagDefinition(description="Natural scenery", threshold=0.7),
+            "portrait": TagDefinition(description="Person face visible", threshold=0.8),
+        }
+
+        prompt = _build_prompt(tags)
+        assert "landscape" in prompt
+        assert "portrait" in prompt
+        assert "score >= 0.2" in prompt or "score >= 0" in prompt
+        assert "max 10 words" in prompt
+        assert "omitted" in prompt.lower()
+
+
 
 class TestParseResponse:
     """Test parsing of AI response strings to TaggingResponse."""
@@ -167,6 +181,33 @@ class TestParseResponse:
         assert result.results[0].score == 0.0
         assert result.results[1].score == 1.0
         assert result.results[2].score == 0.5
+
+    def test_parse_response_empty_results(self):
+        response_str = json.dumps({
+            "scene_description": "A dark empty room with no distinct objects.",
+            "results": []
+        })
+        result = _parse_response(response_str)
+        assert result.scene_description == "A dark empty room with no distinct objects."
+        assert result.results == []
+
+    def test_parse_response_missing_results_key(self):
+        response_str = json.dumps({
+            "scene_description": "An open sky."
+        })
+        result = _parse_response(response_str)
+        assert result.scene_description == "An open sky."
+        assert result.results == []
+
+    def test_parse_response_null_results(self):
+        response_str = json.dumps({
+            "scene_description": "An open sky.",
+            "results": None
+        })
+        result = _parse_response(response_str)
+        assert result.scene_description == "An open sky."
+        assert result.results == []
+
 
 
 class TestTagImageWithAi:

@@ -150,22 +150,20 @@ def _build_prompt(
     tag_definitions: dict[str, TagDefinition],
     use_structured_outputs: bool = False,
 ) -> str:
-    """Build the prompt that asks the model to evaluate all tags for one image."""
+    """Build the prompt that asks the model to evaluate tags sparsely for one image."""
     lines = [
         "You are an expert image tagging and visual analysis system.",
-        "Your task is to analyze the image objectively and evaluate each candidate tag strictly based on visible visual evidence.",
+        "Your task is to analyze the image objectively and evaluate candidate tags strictly based on visible visual evidence.",
         "",
         "Evaluation Instructions:",
-        "1. First, write a concise factual description of what is actually visible in the scene ('scene_description') to ground your analysis.",
-        "2. Then, evaluate EACH tag in the list against the visual evidence in the image.",
-        "3. For each tag, first write a brief factual explanation ('reason') referencing visible elements or explaining absence.",
-        "4. Then, assign a confidence score from 0.0 to 1.0 based on strict visual criteria:",
-        "   - Score 0.8 to 1.0: The tag's criteria are clearly, prominently, and unambiguously visible in the image.",
-        "   - Score 0.4 to 0.7: Partial, ambiguous, or background presence of the tag's criteria.",
-        "   - Score 0.0 to 0.3: The tag's criteria are absent, not visible, or merely speculative.",
-        "5. ANTI-HALLUCINATION RULE: If a tag does not match the image or is absent, assign a low confidence score (0.0 to 0.1). Do not guess, speculate, or hallucinate elements that cannot be directly seen.",
-        "6. SPARSITY & MUTUAL EXCLUSIVITY: Most photos match 0 or at most 1 tag. It is rare for 2 tags to match, and virtually impossible for 3 or more disparate categories to apply. Only assign high confidence to the primary dominant subject.",
-        "7. You must evaluate every tag in the list.",
+        "1. First, write 1 concise factual sentence describing what is visible in the scene ('scene_description') to ground your analysis.",
+        "2. Evaluate candidate tags against the visual evidence in the image.",
+        "3. In 'results', ONLY include tags that are visibly present or plausibly present (score >= 0.2). Omit all absent tags (omitted tags automatically default to score 0.0). If no tags apply, return an empty list for 'results'.",
+        "4. For each included tag, provide a concise 'reason' (max 10 words) referencing visible elements, followed by the 'score' (0.0 to 1.0):",
+        "   - Score 0.8 to 1.0: Clearly, prominently, and unambiguously visible.",
+        "   - Score 0.4 to 0.7: Partial, ambiguous, or background presence.",
+        "   - Score 0.2 to 0.3: Minimal or faint visual presence.",
+        "5. ANTI-HALLUCINATION & SPARSITY: Most photos match 0 or at most 1 tag. Do not speculate, guess, or hallucinate elements that cannot be directly seen.",
         "",
         "Tags to evaluate:",
     ]
@@ -179,16 +177,17 @@ def _build_prompt(
                 "",
                 "Respond ONLY with valid JSON. Use this exact structure (no trailing commas):",
                 "{",
-                '  "scene_description": "<concise factual description of what is visible in the image>",',
+                '  "scene_description": "<1 concise factual sentence describing what is visible in the image>",',
                 '  "results": [',
                 "    {",
                 '      "tag_name": "<tag>",',
-                '      "reason": "<brief factual reason referencing visible elements or explaining absence>",',
+                '      "reason": "<max 10 words referencing visible evidence>",',
                 '      "score": 0.85',
                 "    }",
                 "  ]",
                 "}",
                 "",
+                "Note: Only include tags with score >= 0.2. If no candidate tags apply, return \"results\": [].",
                 "Do not include any text outside of the JSON object.",
             ]
         )
@@ -238,7 +237,7 @@ def _parse_response(content: str | bytes) -> TaggingResponse:
             )
         raise ValueError(f"AI did not return valid JSON: {exc}\nResponse: {content[:500]}") from exc
 
-    raw_results = parsed.get("results", [])
+    raw_results = parsed.get("results") or []
     tag_results = []
     for item in raw_results:
         try:

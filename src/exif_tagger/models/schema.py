@@ -183,7 +183,7 @@ class TagResult(BaseModel):
     tag_name: str
     reason: str | None = Field(
         default=None,
-        description="Brief factual explanation referencing visible elements or why it does not match.",
+        description="Concise factual explanation referencing visible elements (max 10 words).",
     )
     score: float = Field(ge=0.0, le=1.0, description="Confidence score 0-1")
 

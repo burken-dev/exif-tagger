@@ -58,6 +58,20 @@ class TestBuildPrompt:
         assert "tag_name" in prompt
         assert "score" in prompt
 
+    def test_build_prompt_sparse_instructions(self):
+        tags = {
+            "landscape": TagDefinition(description="Natural scenery", threshold=0.7),
+            "portrait": TagDefinition(description="Person face visible", threshold=0.8),
+        }
+
+        prompt = _build_prompt(tags)
+        assert "landscape" in prompt
+        assert "portrait" in prompt
+        assert "score >= 0.2" in prompt or "score >= 0" in prompt
+        assert "max 10 words" in prompt
+        assert "omitted" in prompt.lower()
+
+
 
 class TestParseResponse:
     """Test parsing of AI response strings to TaggingResponse."""

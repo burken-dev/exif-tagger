@@ -175,6 +175,11 @@ export function useProcessing() {
     }
   }, []);
 
+  const processedCountRef = useRef<number>(processedCount);
+  useEffect(() => {
+    processedCountRef.current = processedCount;
+  }, [processedCount]);
+
   // Timer ticking during active processing
   useEffect(() => {
     if (!isRunning || isPaused) return;
@@ -182,13 +187,14 @@ export function useProcessing() {
     const interval = setInterval(() => {
       setElapsedSeconds((prev) => {
         const next = prev + 1;
-        setAvgSecondsPerImage(processedCount > 0 ? next / processedCount : 0);
+        const count = processedCountRef.current;
+        setAvgSecondsPerImage(count > 0 ? next / count : 0);
         return next;
       });
     }, 1000);
 
     return () => clearInterval(interval);
-  }, [isRunning, isPaused, processedCount]);
+  }, [isRunning, isPaused]);
 
   // Polling management
   useEffect(() => {

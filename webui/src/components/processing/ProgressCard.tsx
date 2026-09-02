@@ -1,7 +1,8 @@
 import React from 'react';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Activity, CheckCircle2, AlertTriangle, Loader2, Pause } from 'lucide-react';
+import { Activity, CheckCircle2, AlertTriangle, Loader2, Pause, Timer, Zap } from 'lucide-react';
+import { formatElapsedTime, formatAvgTime } from '@/lib/utils';
 
 export interface ProgressCardProps {
   processedCount: number;
@@ -10,7 +11,9 @@ export interface ProgressCardProps {
   statusText: string;
   isRunning: boolean;
   isPaused?: boolean;
-  summary?: { failed: number; errors?: any[] } | null;
+  elapsedSeconds?: number;
+  avgSecondsPerImage?: number;
+  summary?: { failed: number; errors?: any[]; elapsed_seconds?: number; avg_seconds_per_image?: number } | null;
 }
 
 export const ProgressCard: React.FC<ProgressCardProps> = ({
@@ -20,6 +23,8 @@ export const ProgressCard: React.FC<ProgressCardProps> = ({
   statusText,
   isRunning,
   isPaused = false,
+  elapsedSeconds = 0,
+  avgSecondsPerImage = 0,
   summary,
 }) => {
   const roundedPct = Math.min(100, Math.max(0, Math.round(progressPct || 0)));
@@ -70,6 +75,25 @@ export const ProgressCard: React.FC<ProgressCardProps> = ({
             className="h-full bg-primary rounded-full transition-all duration-300 ease-out"
             style={{ width: `${roundedPct}%` }}
           />
+        </div>
+
+        <div className="flex flex-wrap items-center gap-6 pt-1 text-xs text-muted-foreground">
+          <div className="flex items-center gap-1.5 font-mono">
+            <Timer className="w-3.5 h-3.5 text-primary" />
+            <span>Time elapsed:</span>
+            <span className="text-foreground font-semibold">
+              {formatElapsedTime(elapsedSeconds || 0)}
+            </span>
+          </div>
+          <div className="flex items-center gap-1.5 font-mono">
+            <Zap className="w-3.5 h-3.5 text-amber-500" />
+            <span>Avg time per image:</span>
+            <span className="text-foreground font-semibold">
+              {processedCount > 0 && (elapsedSeconds || 0) > 0
+                ? `${formatAvgTime(avgSecondsPerImage || 0)} / img`
+                : '--'}
+            </span>
+          </div>
         </div>
 
         {summary && (

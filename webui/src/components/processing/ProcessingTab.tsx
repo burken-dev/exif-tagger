@@ -16,6 +16,8 @@ export const ProcessingTab: React.FC = () => {
     processedCount,
     totalCount,
     progressPct,
+    elapsedSeconds,
+    avgSecondsPerImage,
     logs,
     autoScroll,
     statusText,
@@ -112,6 +114,8 @@ export const ProcessingTab: React.FC = () => {
         statusText={statusText}
         isRunning={isRunning}
         isPaused={isPaused}
+        elapsedSeconds={elapsedSeconds}
+        avgSecondsPerImage={avgSecondsPerImage}
         summary={summary}
       />
 

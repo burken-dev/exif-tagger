@@ -46,9 +46,17 @@ export interface ProcessingStatus {
   total?: number;
   processed?: number;
   progressPct?: number;
+  elapsedSeconds?: number;
+  avgSecondsPerImage?: number;
+  elapsed_seconds?: number;
+  avg_seconds_per_image?: number;
   summary?: {
     failed: number;
     errors?: any[];
+    elapsed_seconds?: number;
+    avg_seconds_per_image?: number;
+    elapsedSeconds?: number;
+    avgSecondsPerImage?: number;
   } | null;
   logs?: LogItem[];
 }

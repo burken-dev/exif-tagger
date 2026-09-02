@@ -23,10 +23,12 @@ export function useProcessing() {
   const [processedCount, setProcessedCount] = useState<number>(0);
   const [totalCount, setTotalCount] = useState<number>(0);
   const [progressPct, setProgressPct] = useState<number>(0);
+  const [elapsedSeconds, setElapsedSeconds] = useState<number>(0);
+  const [avgSecondsPerImage, setAvgSecondsPerImage] = useState<number>(0);
   const [logs, setLogs] = useState<LogItem[]>([]);
   const [autoScroll, setAutoScroll] = useState<boolean>(true);
   const [statusText, setStatusText] = useState<string>('Idle');
-  const [summary, setSummary] = useState<{ failed: number; errors?: any[] } | null>(null);
+  const [summary, setSummary] = useState<ProcessingStatus['summary']>(null);
   const [folders, setFolders] = useState<FolderItem[]>([]);
   const [modalFolder, setModalFolder] = useState<string>('');
   const [folderBreadcrumbs, setFolderBreadcrumbs] = useState<FolderBreadcrumb[]>([]);
@@ -131,6 +133,15 @@ export function useProcessing() {
         }
       }
 
+      const elapsed = typeof data.elapsedSeconds === 'number' ? data.elapsedSeconds : data.elapsed_seconds;
+      if (typeof elapsed === 'number') {
+        setElapsedSeconds(elapsed);
+      }
+      const avgTime = typeof data.avgSecondsPerImage === 'number' ? data.avgSecondsPerImage : data.avg_seconds_per_image;
+      if (typeof avgTime === 'number') {
+        setAvgSecondsPerImage(avgTime);
+      }
+
       // Append new logs sequentially
       if (data.logs && Array.isArray(data.logs)) {
         if (data.logs.length > 0) {
@@ -163,6 +174,27 @@ export function useProcessing() {
       return false;
     }
   }, []);
+
+  const processedCountRef = useRef<number>(processedCount);
+  useEffect(() => {
+    processedCountRef.current = processedCount;
+  }, [processedCount]);
+
+  // Timer ticking during active processing
+  useEffect(() => {
+    if (!isRunning || isPaused) return;
+
+    const interval = setInterval(() => {
+      setElapsedSeconds((prev) => {
+        const next = prev + 1;
+        const count = processedCountRef.current;
+        setAvgSecondsPerImage(count > 0 ? next / count : 0);
+        return next;
+      });
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [isRunning, isPaused]);
 
   // Polling management
   useEffect(() => {
@@ -208,6 +240,8 @@ export function useProcessing() {
           setProcessedCount(0);
           setTotalCount(0);
           setProgressPct(0);
+          setElapsedSeconds(0);
+          setAvgSecondsPerImage(0);
           setSummary(null);
           wasRunningRef.current = true;
           setIsRunning(true);
@@ -305,6 +339,8 @@ export function useProcessing() {
     processedCount,
     totalCount,
     progressPct,
+    elapsedSeconds,
+    avgSecondsPerImage,
     logs,
     autoScroll,
     statusText,

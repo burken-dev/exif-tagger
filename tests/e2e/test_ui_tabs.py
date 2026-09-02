@@ -112,6 +112,10 @@ def test_processing_running_state_ui(browser_page: Page):
         "currentImage": "image_003.jpg",
         "progressPct": 30.0,
         "stopRequested": False,
+        "elapsedSeconds": 45.0,
+        "avgSecondsPerImage": 15.0,
+        "elapsed_seconds": 45.0,
+        "avg_seconds_per_image": 15.0,
         "logs": [],
         "summary": None,
     }
@@ -152,6 +156,14 @@ def test_processing_running_state_ui(browser_page: Page):
     max_images_input = browser_page.locator("#maxImages")
     assert max_images_input.is_disabled()
 
+    # Verify timer and throughput metrics
+    browser_page.locator("text=00:45").wait_for(state="visible")
+    content = browser_page.content()
+    assert "Time elapsed:" in content
+    assert "00:45" in content
+    assert "Avg time per image:" in content
+    assert "15s / img" in content
+
     screenshot(browser_page, "tab_processing_running_state")
 
 
@@ -167,6 +179,10 @@ def test_processing_paused_state_ui(browser_page: Page):
         "currentImage": "image_005.jpg",
         "progressPct": 50.0,
         "stopRequested": False,
+        "elapsedSeconds": 120.0,
+        "avgSecondsPerImage": 24.0,
+        "elapsed_seconds": 120.0,
+        "avg_seconds_per_image": 24.0,
         "logs": [],
         "summary": None,
     }
@@ -210,8 +226,61 @@ def test_processing_paused_state_ui(browser_page: Page):
     # Verify status badge shows Paused
     content = browser_page.content()
     assert "Paused" in content
+    browser_page.locator("text=02:00").wait_for(state="visible")
+    assert "Time elapsed:" in content
+    assert "02:00" in content
+    assert "Avg time per image:" in content
+    assert "24s / img" in content
 
     screenshot(browser_page, "tab_processing_paused_state")
+
+
+def test_processing_timer_and_throughput_metrics_display(browser_page: Page):
+    """Processing tab displays active session timer and average time per image metrics."""
+    import json
+
+    # 1. Idle state checks default timer values
+    browser_page.locator("text=Time elapsed:").wait_for(state="visible")
+    browser_page.locator("text=00:00").wait_for(state="visible")
+    content = browser_page.content()
+    assert "Time elapsed:" in content
+    assert "Avg time per image:" in content
+    assert "00:00" in content
+
+    # 2. Running state with active processing metrics
+    status_payload = {
+        "running": True,
+        "paused": False,
+        "processed": 4,
+        "total": 10,
+        "currentImage": "image_004.jpg",
+        "progressPct": 40.0,
+        "stopRequested": False,
+        "elapsedSeconds": 125.4,
+        "avgSecondsPerImage": 31.35,
+        "elapsed_seconds": 125.4,
+        "avg_seconds_per_image": 31.35,
+        "logs": [],
+        "summary": None,
+    }
+
+    browser_page.route(
+        "**/api/status",
+        lambda route: route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps(status_payload),
+        ),
+    )
+
+    browser_page.reload(wait_until="networkidle")
+
+    browser_page.locator("text=02:05").wait_for(state="visible")
+    updated_content = browser_page.content()
+    assert "Time elapsed:" in updated_content
+    assert "02:05" in updated_content
+    assert "Avg time per image:" in updated_content
+    assert "31s / img" in updated_content
 
 
 def test_processing_pause_and_resume_button_actions(browser_page: Page):

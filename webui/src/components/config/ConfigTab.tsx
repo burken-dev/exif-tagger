@@ -477,15 +477,16 @@ export const ConfigTab: React.FC = () => {
                 min="0"
                 max="2"
                 value={formData.model?.temperature ?? 0.1}
-                onChange={(e) =>
+                onChange={(e) => {
+                  const val = parseFloat(e.target.value);
                   setFormData((prev) => ({
                     ...prev,
                     model: {
                       ...prev.model,
-                      temperature: parseFloat(e.target.value) || 0.1,
+                      temperature: isNaN(val) ? 0.1 : val,
                     },
-                  }))
-                }
+                  }));
+                }}
                 className="text-sm"
               />
             </div>
@@ -814,7 +815,10 @@ export const ConfigTab: React.FC = () => {
                   min="0"
                   max="1"
                   value={newTagThreshold}
-                  onChange={(e) => setNewTagThreshold(parseFloat(e.target.value) || 0.7)}
+                  onChange={(e) => {
+                    const val = parseFloat(e.target.value);
+                    setNewTagThreshold(isNaN(val) ? 0.7 : val);
+                  }}
                   className="text-sm"
                 />
               </div>
@@ -862,9 +866,10 @@ export const ConfigTab: React.FC = () => {
                         min="0"
                         max="1"
                         value={tag.threshold ?? 0.7}
-                        onChange={(e) =>
-                          handleUpdateTag(name, 'threshold', parseFloat(e.target.value) || 0.7)
-                        }
+                        onChange={(e) => {
+                          const val = parseFloat(e.target.value);
+                          handleUpdateTag(name, 'threshold', isNaN(val) ? 0.7 : val);
+                        }}
                         className="w-20 text-xs h-8"
                       />
                     </div>

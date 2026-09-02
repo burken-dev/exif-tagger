@@ -32,12 +32,26 @@ class TestModelConfig:
         assert mc.max_tokens == 1024
         assert mc.temperature == 0.5
 
+    def test_zero_temperature(self):
+        mc = ModelConfig(
+            base_url="https://api.openai.com/v1",
+            model_name="gpt-4o",
+            temperature=0.0,
+        )
+        assert mc.temperature == 0.0
+
     def test_invalid_temperature(self):
         with pytest.raises(Exception):
             ModelConfig(
                 base_url="https://api.openai.com/v1",
                 model_name="gpt-4o",
                 temperature=5.0,
+            )
+        with pytest.raises(Exception):
+            ModelConfig(
+                base_url="https://api.openai.com/v1",
+                model_name="gpt-4o",
+                temperature=-0.1,
             )
 
 

@@ -195,6 +195,8 @@ class ProcessingState:
         self._log_entries: list[dict[str, Any]] = []
         self._log_counter = 0
         self._summary: dict | None = None
+        self._active_elapsed_seconds: float = 0.0
+        self._period_start_time: float | None = None
 
     @property
     def running(self) -> bool:
@@ -254,6 +256,9 @@ class ProcessingState:
     def set_paused(self) -> None:
         with self._lock:
             if self._running and not self._paused:
+                if self._period_start_time is not None:
+                    self._active_elapsed_seconds += time.monotonic() - self._period_start_time
+                    self._period_start_time = None
                 self._paused = True
                 self._pause_event.clear()
                 self.add_log("Processing session paused.", "info")
@@ -262,6 +267,7 @@ class ProcessingState:
         with self._lock:
             if self._paused:
                 self._paused = False
+                self._period_start_time = time.monotonic()
                 self._pause_event.set()
                 self.add_log("Processing session resumed.", "info")
 
@@ -284,6 +290,8 @@ class ProcessingState:
             self._log_entries = []
             self._log_counter = 0
             self._summary = None
+            self._active_elapsed_seconds = 0.0
+            self._period_start_time = time.monotonic()
 
     def update_progress(self, image_name: str) -> None:
         with self._lock:
@@ -293,16 +301,25 @@ class ProcessingState:
 
     def set_stop_requested(self) -> None:
         with self._lock:
+            if self._period_start_time is not None:
+                self._active_elapsed_seconds += time.monotonic() - self._period_start_time
+                self._period_start_time = None
             self._stop_requested = True
             self._paused = False
             self._pause_event.set()
 
     def finish(self, summary: dict) -> None:
         with self._lock:
+            if self._period_start_time is not None:
+                self._active_elapsed_seconds += time.monotonic() - self._period_start_time
+                self._period_start_time = None
             self._running = False
             self._paused = False
             self._pause_event.set()
             self._current_image = None
+            if summary is not None:
+                summary["elapsed_seconds"] = round(self.elapsed_seconds, 2)
+                summary["avg_seconds_per_image"] = round(self.avg_seconds_per_image, 2)
             self._summary = summary
 
     @property
@@ -311,6 +328,20 @@ class ProcessingState:
             if self._total == 0:
                 return 0.0
             return round((self._processed / self._total) * 100, 1)
+
+    @property
+    def elapsed_seconds(self) -> float:
+        with self._lock:
+            if self._running and not self._paused and self._period_start_time is not None:
+                return self._active_elapsed_seconds + (time.monotonic() - self._period_start_time)
+            return self._active_elapsed_seconds
+
+    @property
+    def avg_seconds_per_image(self) -> float:
+        with self._lock:
+            if self._processed > 0:
+                return self.elapsed_seconds / self._processed
+            return 0.0
 
     def get_status(self) -> dict:
         """Get current processing state."""
@@ -322,6 +353,8 @@ class ProcessingState:
                 "total": self._total,
                 "currentImage": self._current_image,
                 "progressPct": self.progress_pct,
+                "elapsedSeconds": round(self.elapsed_seconds, 2),
+                "avgSecondsPerImage": round(self.avg_seconds_per_image, 2),
                 "stopRequested": self._stop_requested,
                 "logs": list(self._log_entries),
             }

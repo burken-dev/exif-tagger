@@ -1,6 +1,7 @@
 """Tests for PipelineEngine and ProcessingState classes."""
 
 import threading
+import time
 from unittest.mock import MagicMock
 
 
@@ -244,6 +245,38 @@ class TestProcessingState:
         state.set_stop_requested()
         assert unblocked.wait(timeout=1.0)
         t.join(timeout=1.0)
+
+    def test_processing_state_timer_active_run(self):
+        from exif_tagger.main import ProcessingState
+
+        state = ProcessingState()
+        state.start(total_images=5)
+        time.sleep(0.05)
+        assert state.elapsed_seconds >= 0.04
+        state.update_progress("img1.jpg")
+        assert state.avg_seconds_per_image > 0
+        state.finish({"total_processed": 1})
+        final_elapsed = state.elapsed_seconds
+        time.sleep(0.05)
+        # Timer should stop advancing once finished
+        assert state.elapsed_seconds == final_elapsed
+
+    def test_processing_state_timer_excludes_paused_time(self):
+        from exif_tagger.main import ProcessingState
+
+        state = ProcessingState()
+        state.start(total_images=5)
+        time.sleep(0.05)
+        state.set_paused()
+        paused_elapsed = state.elapsed_seconds
+        time.sleep(0.05)
+        # While paused, elapsed_seconds must not advance
+        assert state.elapsed_seconds == paused_elapsed
+        state.set_resumed()
+        time.sleep(0.05)
+        # After resuming, elapsed_seconds advances again
+        assert state.elapsed_seconds > paused_elapsed
+        state.finish({})
 
 
 class TestProcessingStateThreadSafety:

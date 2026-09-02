@@ -62,6 +62,15 @@ class TestApiStatus:
             data = resp.json()
             assert data["running"] is True
 
+    def test_status_includes_timer_fields(self, client):
+        response = client.get("/api/status")
+        assert response.status_code == 200
+        data = response.json()
+        assert "elapsedSeconds" in data
+        assert "avgSecondsPerImage" in data
+        assert isinstance(data["elapsedSeconds"], (int, float))
+        assert isinstance(data["avgSecondsPerImage"], (int, float))
+
 
 class TestApiStart:
     def test_start_no_running_session(self, client):

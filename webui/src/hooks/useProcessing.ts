@@ -23,10 +23,12 @@ export function useProcessing() {
   const [processedCount, setProcessedCount] = useState<number>(0);
   const [totalCount, setTotalCount] = useState<number>(0);
   const [progressPct, setProgressPct] = useState<number>(0);
+  const [elapsedSeconds, setElapsedSeconds] = useState<number>(0);
+  const [avgSecondsPerImage, setAvgSecondsPerImage] = useState<number>(0);
   const [logs, setLogs] = useState<LogItem[]>([]);
   const [autoScroll, setAutoScroll] = useState<boolean>(true);
   const [statusText, setStatusText] = useState<string>('Idle');
-  const [summary, setSummary] = useState<{ failed: number; errors?: any[] } | null>(null);
+  const [summary, setSummary] = useState<ProcessingStatus['summary']>(null);
   const [folders, setFolders] = useState<FolderItem[]>([]);
   const [modalFolder, setModalFolder] = useState<string>('');
   const [folderBreadcrumbs, setFolderBreadcrumbs] = useState<FolderBreadcrumb[]>([]);
@@ -131,6 +133,13 @@ export function useProcessing() {
         }
       }
 
+      if (typeof data.elapsedSeconds === 'number') {
+        setElapsedSeconds(data.elapsedSeconds);
+      }
+      if (typeof data.avgSecondsPerImage === 'number') {
+        setAvgSecondsPerImage(data.avgSecondsPerImage);
+      }
+
       // Append new logs sequentially
       if (data.logs && Array.isArray(data.logs)) {
         if (data.logs.length > 0) {
@@ -163,6 +172,21 @@ export function useProcessing() {
       return false;
     }
   }, []);
+
+  // Timer ticking during active processing
+  useEffect(() => {
+    if (!isRunning || isPaused) return;
+
+    const interval = setInterval(() => {
+      setElapsedSeconds((prev) => {
+        const next = prev + 1;
+        setAvgSecondsPerImage(processedCount > 0 ? next / processedCount : 0);
+        return next;
+      });
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [isRunning, isPaused, processedCount]);
 
   // Polling management
   useEffect(() => {
@@ -208,6 +232,8 @@ export function useProcessing() {
           setProcessedCount(0);
           setTotalCount(0);
           setProgressPct(0);
+          setElapsedSeconds(0);
+          setAvgSecondsPerImage(0);
           setSummary(null);
           wasRunningRef.current = true;
           setIsRunning(true);
@@ -305,6 +331,8 @@ export function useProcessing() {
     processedCount,
     totalCount,
     progressPct,
+    elapsedSeconds,
+    avgSecondsPerImage,
     logs,
     autoScroll,
     statusText,

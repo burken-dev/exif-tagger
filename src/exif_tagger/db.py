@@ -464,7 +464,8 @@ def reconcile_gallery_index(
                     if old is None:
                         conn.execute(
                             "INSERT INTO images (file_path, filename, relative_path, last_modified, indexed_at) "
-                            "VALUES (?, ?, ?, ?, ?)",
+                            "VALUES (?, ?, ?, ?, ?) "
+                            "ON CONFLICT(file_path) DO UPDATE SET filename = excluded.filename, relative_path = excluded.relative_path, last_modified = excluded.last_modified",
                             (abs_str, name, f"{prefix}{name}", mtime, now_iso),
                         )
                         stats["added"] += 1

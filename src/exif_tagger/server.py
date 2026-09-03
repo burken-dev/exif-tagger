@@ -248,7 +248,7 @@ async def global_exception_handler(request: Request, exc: Exception):
     logger.error("Unhandled exception processing request %s %s: %s", request.method, request.url, exc, exc_info=True)
     return JSONResponse(
         status_code=500,
-        content={"detail": f"Internal server error: {exc}"},
+        content={"detail": "Internal server error"},
     )
 
 
@@ -353,7 +353,8 @@ def api_get_config():
             "log_dir": getattr(config, "log_dir", "/app/logs"),
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to load config: {e}")
+        logger.error("Failed to load config: %s", e)
+        raise HTTPException(status_code=500, detail="Failed to load config")
 
 
 @app.put("/api/config")
@@ -395,6 +396,17 @@ def api_update_config(updates: dict[str, Any]):
 
         if "log_dir" in updates:
             current["log_dir"] = updates["log_dir"]
+
+        from urllib.parse import urlparse
+
+        model_section = current.get("model") or {}
+        if "base_url" in model_section:
+            parts = urlparse(str(model_section["base_url"]))
+            if parts.scheme not in ("http", "https") or not parts.hostname or parts.username or parts.password:
+                raise HTTPException(status_code=400, detail="model.base_url must be an http(s) URL without credentials")
+
+        if "log_dir" in current and not Path(str(current["log_dir"])).is_absolute():
+            raise HTTPException(status_code=400, detail="log_dir must be an absolute path")
 
         from exif_tagger.models.schema import Config as SchemaConfig
 
@@ -673,7 +685,8 @@ async def api_get_gallery_images(
             "limit": limit,
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to query gallery images: {e}")
+        logger.error("Failed to query gallery images: %s", e)
+        raise HTTPException(status_code=500, detail="Failed to query gallery images")
     finally:
         cancelled_event.set()
         if not monitor_task.done():
@@ -696,7 +709,8 @@ def api_get_gallery_folders(path: str = ""):
     except ValueError as e:
         raise HTTPException(status_code=403, detail=str(e))
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to query gallery folders: {e}")
+        logger.error("Failed to query gallery folders: %s", e)
+        raise HTTPException(status_code=500, detail="Failed to query gallery folders")
 
 
 @app.get("/api/gallery/tags")
@@ -706,7 +720,8 @@ def api_get_gallery_tags():
         tag_names = get_all_tags()
         return {"tags": tag_names}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to fetch gallery tags: {e}")
+        logger.error("Failed to fetch gallery tags: %s", e)
+        raise HTTPException(status_code=500, detail="Failed to fetch gallery tags")
 
 
 @app.get("/api/gallery/image/file")
@@ -716,7 +731,8 @@ def api_get_gallery_image_file_by_path(path: str):
         config = load_config(CONFIG_PATH)
         root_dir = Path(config.root_directory).resolve()
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to load config: {e}")
+        logger.error("Failed to load config for image file: %s", e)
+        raise HTTPException(status_code=500, detail="Failed to load config")
 
     p = Path(path)
     resolved_path = p.resolve() if p.is_absolute() else (root_dir / p).resolve()
@@ -762,7 +778,8 @@ def api_sync_single_image_endpoint(req: SingleImageSyncRequest):
     except ValueError as e:
         raise HTTPException(status_code=403, detail=str(e))
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to sync image: {e}")
+        logger.error("Failed to sync image: %s", e)
+        raise HTTPException(status_code=500, detail="Failed to sync image")
 
 
 @app.get("/api/gallery/image/{image_id}")
@@ -821,7 +838,8 @@ def api_update_gallery_image_tags(image_id: int, req: ImageTagsUpdateRequest):
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to update image tags: {e}")
+        logger.error("Failed to update image tags: %s", e)
+        raise HTTPException(status_code=500, detail="Failed to update image tags")
 
 
 @app.post("/api/gallery/batch-tags")
@@ -837,7 +855,8 @@ def api_batch_update_tags(req: BatchTagRequest):
         )
         return {"status": "success", "modified": modified}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed batch update: {e}")
+        logger.error("Failed batch update: %s", e)
+        raise HTTPException(status_code=500, detail="Failed batch update")
 
 
 @app.post("/api/gallery/remove-tag-global")
@@ -851,7 +870,8 @@ def api_remove_tag_global(req: GlobalTagRemoveRequest):
         )
         return {"status": "success", "modified": modified}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to remove tag globally: {e}")
+        logger.error("Failed to remove tag globally: %s", e)
+        raise HTTPException(status_code=500, detail="Failed to remove tag globally")
 
 
 @app.get("/api/gallery/image/{image_id}/suppressions")
@@ -863,7 +883,8 @@ def api_get_gallery_image_suppressions(image_id: int):
         suppressions = get_image_suppressions(image_id)
         return {"suppressions": suppressions}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to fetch suppressions: {e}")
+        logger.error("Failed to fetch suppressions: %s", e)
+        raise HTTPException(status_code=500, detail="Failed to fetch suppressions")
 
 
 @app.delete("/api/gallery/image/{image_id}/suppressions/{tag_name}")
@@ -875,7 +896,8 @@ def api_delete_gallery_image_suppression(image_id: int, tag_name: str):
         remove_user_suppression(image_id, tag_name)
         return {"status": "removed"}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to remove suppression: {e}")
+        logger.error("Failed to remove suppression: %s", e)
+        raise HTTPException(status_code=500, detail="Failed to remove suppression")
 
 
 from fastapi.staticfiles import StaticFiles

@@ -84,6 +84,10 @@ def test_heic_gallery_image_file_by_id_conversion(tmp_path, monkeypatch):
 
     client = TestClient(app, headers={"Authorization": f"Bearer {TEST_API_TOKEN}"})
 
+    class DummyConfig:
+        root_directory = str(tmp_path)
+
+    monkeypatch.setattr("exif_tagger.server.load_config", lambda path: DummyConfig())
     monkeypatch.setattr("exif_tagger.server.get_image_by_id", lambda img_id: {"file_path": str(test_heic)})
 
     res = client.get("/api/gallery/image/42/file")

@@ -693,6 +693,8 @@ def api_get_gallery_folders(path: str = ""):
             config_path=CONFIG_PATH,
         )
         return data
+    except ValueError as e:
+        raise HTTPException(status_code=403, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to query gallery folders: {e}")
 
@@ -757,6 +759,8 @@ def api_sync_single_image_endpoint(req: SingleImageSyncRequest):
         return result
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=403, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to sync image: {e}")
 
@@ -777,7 +781,16 @@ def api_get_gallery_image_file(image_id: int):
     if not image_data:
         raise HTTPException(status_code=404, detail="Image not found")
 
-    file_path = Path(image_data["file_path"])
+    config = load_config(CONFIG_PATH)
+    root_dir = Path(config.root_directory).resolve()
+    resolved = Path(image_data["file_path"]).resolve()
+    try:
+        resolved.relative_to(root_dir)
+    except ValueError:
+        raise HTTPException(status_code=403, detail="Access denied: path is outside root directory")
+    if resolved.suffix.lower() not in IMAGE_EXTENSIONS:
+        raise HTTPException(status_code=400, detail="Invalid image file extension")
+    file_path = resolved
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="Image file does not exist on disk")
 

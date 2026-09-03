@@ -1,8 +1,9 @@
 """Auth gate tests for /api/* routes."""
 from __future__ import annotations
 
-import exif_tagger.server as server_module
 from fastapi.testclient import TestClient
+
+import exif_tagger.server as server_module
 
 TOKEN = "test-token-xyz"
 

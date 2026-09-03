@@ -46,7 +46,6 @@ def test_heic_gallery_image_file_conversion(tmp_path, monkeypatch):
     from fastapi.testclient import TestClient
 
     from exif_tagger.server import app
-
     from tests.conftest import TEST_API_TOKEN
 
     test_heic = tmp_path / "test_sample.heic"
@@ -75,7 +74,6 @@ def test_heic_gallery_image_file_by_id_conversion(tmp_path, monkeypatch):
     from fastapi.testclient import TestClient
 
     from exif_tagger.server import app
-
     from tests.conftest import TEST_API_TOKEN
 
     test_heic = tmp_path / "test_sample2.heic"

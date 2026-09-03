@@ -1,8 +1,9 @@
 """Schedule creation validates folder; job failures are recorded."""
 from __future__ import annotations
 
-import exif_tagger.server as server_module
 from fastapi.testclient import TestClient
+
+import exif_tagger.server as server_module
 
 HEADERS = {"Authorization": "Bearer test-token-xyz"}
 
@@ -25,6 +26,7 @@ def test_create_schedule_outside_root_rejected(monkeypatch, tmp_path):
 
 def test_run_schedule_job_failure_recorded(monkeypatch, tmp_path):
     from unittest.mock import patch
+
     from exif_tagger.models.schema import ScheduleModel
 
     gallery = tmp_path / "gallery"

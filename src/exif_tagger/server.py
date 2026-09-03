@@ -6,8 +6,8 @@ Runs as a long-lived service (uvicorn) instead of CLI batch execution.
 
 from __future__ import annotations
 
-import io
 import contextlib
+import io
 import json
 import logging
 import os

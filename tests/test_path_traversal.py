@@ -1,9 +1,10 @@
 """Containment tests: no indexing/serving/listing outside the gallery root."""
 from __future__ import annotations
 
-import exif_tagger.server as server_module
 from fastapi.testclient import TestClient
 from PIL import Image
+
+import exif_tagger.server as server_module
 
 HEADERS = {"Authorization": "Bearer test-token-xyz"}
 

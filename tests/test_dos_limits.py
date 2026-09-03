@@ -1,8 +1,9 @@
 """Resource-consumption limits on user-controlled inputs."""
 from __future__ import annotations
 
-import exif_tagger.server as server_module
 from fastapi.testclient import TestClient
+
+import exif_tagger.server as server_module
 
 HEADERS = {"Authorization": "Bearer test-token-xyz"}
 

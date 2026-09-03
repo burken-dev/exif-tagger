@@ -3,8 +3,9 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
-import exif_tagger.server as server_module
 from fastapi.testclient import TestClient
+
+import exif_tagger.server as server_module
 
 HEADERS = {"Authorization": "Bearer test-token-xyz"}
 

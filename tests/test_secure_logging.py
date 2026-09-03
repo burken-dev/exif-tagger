@@ -30,3 +30,15 @@ def test_setup_secure_logging_creates_file_handler(tmp_path):
     log_file = Path(log_dir) / "exif-tagger.log"
     assert log_file.exists()
     assert "Test log entry" in log_file.read_text()
+
+
+def test_redaction_does_not_mutate_record(caplog):
+    import logging
+
+    from exif_tagger.ai_client import SecretRedactingFormatter
+
+    rec = logging.LogRecord("t", logging.INFO, __file__, 1, "key sk-abcdefghijklmnopqrst", None, None)
+    out = SecretRedactingFormatter("%(message)s").format(rec)
+    assert "[REDACTED]" in out
+    assert rec.msg == "key sk-abcdefghijklmnopqrst"
+    assert rec.args is None

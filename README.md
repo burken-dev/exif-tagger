@@ -70,6 +70,8 @@ docker compose run --rm exif-tagger
 docker compose run --rm exif-tagger -v
 ```
 
+> The container runs as non-root uid 10000; first run may need `sudo chown -R 10000:10000 ./data`.
+
 ### 2. Local Python (development)
 
 ```bash

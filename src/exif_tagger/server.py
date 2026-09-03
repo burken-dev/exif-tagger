@@ -28,7 +28,7 @@ Image.MAX_IMAGE_PIXELS = 50_000_000
 
 MAX_INLINE_IMAGE_BYTES = 100_000_000
 
-from exif_tagger.ai_client import SecretRedactor, setup_secure_logging
+from exif_tagger.ai_client import SecretRedactingFormatter, setup_secure_logging
 from exif_tagger.config import get_config_path, load_config
 from exif_tagger.main import PipelineEngine, validate_and_resolve_subfolder
 from exif_tagger.models.schema import IMAGE_EXTENSIONS, ScheduleModel, TagDefinition
@@ -82,17 +82,15 @@ SERVER_LOG_DIR = _config_dir / "server-log"
 SERVER_LOG_DIR.mkdir(parents=True, exist_ok=True)
 
 
-_log_formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
+_log_formatter = SecretRedactingFormatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
 
 _error_file_handler = logging.FileHandler(SERVER_LOG_DIR / "error.log")
 _error_file_handler.setLevel(logging.ERROR)
 _error_file_handler.setFormatter(_log_formatter)
-_error_file_handler.addFilter(SecretRedactor())
 
 _server_file_handler = logging.FileHandler(SERVER_LOG_DIR / "server.log")
 _server_file_handler.setLevel(logging.INFO)
 _server_file_handler.setFormatter(_log_formatter)
-_server_file_handler.addFilter(SecretRedactor())
 
 _root_logger = logging.getLogger()
 _root_logger.addHandler(_error_file_handler)
@@ -185,16 +183,20 @@ def _run_schedule_job(schedule_id: str) -> None:
 
     logger.info("Running scheduled job: %s (folder=%s)", schedule.name, schedule.folder)
 
-    job_engine = PipelineEngine(config_path=CONFIG_PATH, verbose=False)
-    summary = job_engine.start_session(
-        root_directory=schedule.folder,
-        max_images=schedule.max_images,
-    )
-
+    try:
+        job_engine = PipelineEngine(config_path=CONFIG_PATH, verbose=False)
+        summary = job_engine.start_session(
+            root_directory=schedule.folder,
+            max_images=schedule.max_images,
+        )
+        status = "success" if not summary.get("errors") else "failed"
+    except Exception as exc:
+        logger.error("Scheduled job '%s' failed: %s", schedule_id, exc, exc_info=True)
+        status = "failed"
     now = datetime.now(UTC).isoformat()
     with _schedules_lock:
         schedule.last_run_at = now
-        schedule.last_status = "success" if not summary.get("errors") else "failed"
+        schedule.last_status = status
     _save_schedules()
 
 
@@ -472,6 +474,13 @@ def api_list_schedules():
 @app.post("/api/schedule")
 def api_create_schedule(req: ScheduleCreateRequest):
     """Add a new processing schedule."""
+    engine = _get_engine()
+    config = engine._load_config()
+    base_gallery_root = Path(config.root_directory).resolve()
+    try:
+        validate_and_resolve_subfolder(req.folder, base_gallery_root)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     sid = f"schedule_{uuid.uuid4().hex[:8]}"
 
     schedule = ScheduleModel(

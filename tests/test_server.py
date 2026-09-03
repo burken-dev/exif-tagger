@@ -328,39 +328,45 @@ class TestApiSchedules:
         assert data == []
 
     def test_create_schedule(self, client):
-        with patch.object(server_module, "_setup_scheduler"):
-            with patch.object(server_module, "_save_schedules"):
-                resp = client.post(
-                    "/api/schedule",
-                    json={
-                        "name": "Daily scan",
-                        "folder": "/data/images",
-                        "interval_hours": 6,
-                        "enabled": True,
-                    },
-                )
+        mock_engine = MagicMock()
+        mock_engine._load_config.return_value.root_directory = "/data/images"
+        with patch.object(server_module, "_get_engine", return_value=mock_engine):
+            with patch.object(server_module, "_setup_scheduler"):
+                with patch.object(server_module, "_save_schedules"):
+                    resp = client.post(
+                        "/api/schedule",
+                        json={
+                            "name": "Daily scan",
+                            "folder": "/data/images",
+                            "interval_hours": 6,
+                            "enabled": True,
+                        },
+                    )
             assert resp.status_code == 200
             data = resp.json()
             assert "id" in data
 
     def test_delete_schedule(self, client):
-        with patch.object(server_module, "_setup_scheduler"):
-            with patch.object(server_module, "_save_schedules"):
-                # First create a schedule
-                resp = client.post(
-                    "/api/schedule",
-                    json={
-                        "name": "Test",
-                        "folder": "/data/images",
-                        "interval_hours": 1,
-                    },
-                )
-                sid = resp.json()["id"]
+        mock_engine = MagicMock()
+        mock_engine._load_config.return_value.root_directory = "/data/images"
+        with patch.object(server_module, "_get_engine", return_value=mock_engine):
+            with patch.object(server_module, "_setup_scheduler"):
+                with patch.object(server_module, "_save_schedules"):
+                    # First create a schedule
+                    resp = client.post(
+                        "/api/schedule",
+                        json={
+                            "name": "Test",
+                            "folder": "/data/images",
+                            "interval_hours": 1,
+                        },
+                    )
+                    sid = resp.json()["id"]
 
-                # Then delete it
-                resp = client.delete(f"/api/schedule/{sid}")
-                assert resp.status_code == 200
-                assert resp.json()["status"] == "deleted"
+                    # Then delete it
+                    resp = client.delete(f"/api/schedule/{sid}")
+                    assert resp.status_code == 200
+                    assert resp.json()["status"] == "deleted"
 
     def test_delete_nonexistent_schedule(self, client):
         resp = client.delete("/api/schedule/nonexistent_id")

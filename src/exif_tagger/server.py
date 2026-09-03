@@ -7,6 +7,7 @@ Runs as a long-lived service (uvicorn) instead of CLI batch execution.
 from __future__ import annotations
 
 import io
+import contextlib
 import json
 import logging
 import os
@@ -18,10 +19,14 @@ from pathlib import Path
 from typing import Any
 
 from apscheduler.schedulers.background import BackgroundScheduler
-from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi import FastAPI, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse, JSONResponse
 from PIL import Image
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+
+Image.MAX_IMAGE_PIXELS = 50_000_000
+
+MAX_INLINE_IMAGE_BYTES = 100_000_000
 
 from exif_tagger.ai_client import SecretRedactor, setup_secure_logging
 from exif_tagger.config import get_config_path, load_config
@@ -52,6 +57,7 @@ async def api_token_middleware(request: Request, call_next):
 
 _engine: PipelineEngine | None = None
 _engine_lock = threading.Lock()
+_schedules_lock = threading.Lock()
 _schedules: dict[str, ScheduleModel] = {}
 _scheduler: BackgroundScheduler | None = None
 _config_dir = Path(__file__).resolve().parent.parent.parent
@@ -129,11 +135,22 @@ def _load_schedules() -> dict[str, ScheduleModel]:
 
 
 def _save_schedules() -> None:
-    """Persist schedules to disk."""
+    """Persist schedules to disk (atomic replace, crash-safe)."""
+    import tempfile
+
     schedules_file = get_schedules_file_path()
     schedules_file.parent.mkdir(parents=True, exist_ok=True)
-    with open(schedules_file, "w") as f:
-        json.dump({sid: s.model_dump() for sid, s in _schedules.items()}, f, indent=2)
+    with _schedules_lock:
+        payload = {sid: s.model_dump() for sid, s in _schedules.items()}
+    fd, tmp_name = tempfile.mkstemp(dir=str(schedules_file.parent), prefix=".schedules.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w") as f:
+            json.dump(payload, f, indent=2)
+        os.replace(tmp_name, schedules_file)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.unlink(tmp_name)
+        raise
 
 
 def _compute_next_run(schedule: ScheduleModel) -> str | None:
@@ -175,8 +192,9 @@ def _run_schedule_job(schedule_id: str) -> None:
     )
 
     now = datetime.now(UTC).isoformat()
-    schedule.last_run_at = now
-    schedule.last_status = "success" if not summary.get("errors") else "failed"
+    with _schedules_lock:
+        schedule.last_run_at = now
+        schedule.last_status = "success" if not summary.get("errors") else "failed"
     _save_schedules()
 
 
@@ -189,8 +207,9 @@ def _setup_scheduler() -> None:
         logger.info("Shutting down existing scheduler before rebuild")
         _scheduler.shutdown(wait=False)
 
-    _schedules.clear()
-    _schedules.update(_load_schedules())
+    with _schedules_lock:
+        _schedules.clear()
+        _schedules.update(_load_schedules())
 
     from apscheduler.triggers.cron import CronTrigger
     from apscheduler.triggers.interval import IntervalTrigger
@@ -465,7 +484,8 @@ def api_create_schedule(req: ScheduleCreateRequest):
         enabled=req.enabled,
     )
 
-    _schedules[sid] = schedule
+    with _schedules_lock:
+        _schedules[sid] = schedule
     _save_schedules()
 
     # Add to scheduler if enabled
@@ -481,7 +501,8 @@ def api_delete_schedule(schedule_id: str):
     if schedule_id not in _schedules:
         raise HTTPException(status_code=404, detail="Schedule not found")
 
-    del _schedules[schedule_id]
+    with _schedules_lock:
+        del _schedules[schedule_id]
     _save_schedules()
 
     # Rebuild scheduler without this job
@@ -517,7 +538,7 @@ from exif_tagger.db import (
 
 
 class BatchTagRequest(BaseModel):
-    image_ids: list[int]
+    image_ids: list[int] = Field(max_length=500)
     add_tags: list[str] = []
     remove_tags: list[str] = []
 
@@ -639,8 +660,8 @@ def api_gallery_sync_status():
 @app.get("/api/gallery/images")
 async def api_get_gallery_images(
     request: Request,
-    offset: int = 0,
-    limit: int = 50,
+    offset: int = Query(default=0, ge=0),
+    limit: int = Query(default=50, ge=1, le=200),
     tags: str | None = None,
     search: str | None = None,
     folder: str | None = None,
@@ -748,6 +769,9 @@ def api_get_gallery_image_file_by_path(path: str):
     if resolved_path.suffix.lower() not in IMAGE_EXTENSIONS:
         raise HTTPException(status_code=400, detail="Invalid image file extension")
 
+    if resolved_path.stat().st_size > MAX_INLINE_IMAGE_BYTES:
+        raise HTTPException(status_code=413, detail="Image file too large to serve inline")
+
     if resolved_path.suffix.lower() in (".heic", ".heif"):
         with Image.open(resolved_path) as img:
             if img.mode != "RGB":
@@ -810,6 +834,9 @@ def api_get_gallery_image_file(image_id: int):
     file_path = resolved
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="Image file does not exist on disk")
+
+    if file_path.stat().st_size > MAX_INLINE_IMAGE_BYTES:
+        raise HTTPException(status_code=413, detail="Image file too large to serve inline")
 
     if file_path.suffix.lower() in (".heic", ".heif"):
         with Image.open(file_path) as img:

@@ -15,6 +15,8 @@ from typing import Any
 from openai import OpenAI
 from PIL import Image
 
+Image.MAX_IMAGE_PIXELS = 50_000_000
+
 _CLIENT_CACHE: dict[tuple[str, str], OpenAI] = {}
 _CLIENT_CACHE_LOCK = threading.Lock()
 

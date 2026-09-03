@@ -45,7 +45,7 @@ def _expected_api_token() -> str:
 
 @app.middleware("http")
 async def api_token_middleware(request: Request, call_next):
-    if request.url.path.startswith("/api/"):
+    if request.url.path.startswith("/api/") or request.url.path in ("/docs", "/redoc", "/openapi.json"):
         expected = _expected_api_token()
         if not expected:
             return JSONResponse(status_code=503, content={"detail": "Server API token is not configured"})
@@ -57,7 +57,7 @@ async def api_token_middleware(request: Request, call_next):
 
 _engine: PipelineEngine | None = None
 _engine_lock = threading.Lock()
-_schedules_lock = threading.Lock()
+_schedules_lock = threading.RLock()
 _schedules: dict[str, ScheduleModel] = {}
 _scheduler: BackgroundScheduler | None = None
 _config_dir = Path(__file__).resolve().parent.parent.parent
@@ -177,7 +177,8 @@ def _compute_next_run(schedule: ScheduleModel) -> str | None:
 def _run_schedule_job(schedule_id: str) -> None:
     """Execute a scheduled job."""
     global _engine
-    schedule = _schedules.get(schedule_id)
+    with _schedules_lock:
+        schedule = _schedules.get(schedule_id)
     if not schedule or not schedule.enabled:
         return
 
@@ -219,7 +220,9 @@ def _setup_scheduler() -> None:
     _scheduler = BackgroundScheduler(timezone=UTC)
     _scheduler.start()
 
-    for sid, schedule in _schedules.items():
+    with _schedules_lock:
+        _schedules_snapshot = list(_schedules.items())
+    for sid, schedule in _schedules_snapshot:
         if not schedule.enabled:
             continue
 
@@ -440,6 +443,8 @@ def api_update_config(updates: dict[str, Any]):
 
         return {"status": "updated"}
 
+    except HTTPException:
+        raise
     except Exception as e:
         # Format Pydantic validation errors into a human-readable message
         error_detail = str(e)
@@ -464,7 +469,9 @@ def api_update_config(updates: dict[str, Any]):
 def api_list_schedules():
     """List all configured schedules with computed next_run_at."""
     result = []
-    for sid, schedule in _schedules.items():
+    with _schedules_lock:
+        items = list(_schedules.items())
+    for sid, schedule in items:
         entry_data = schedule.model_dump()
         entry_data["next_run_at"] = _compute_next_run(schedule)
         result.append(entry_data)
@@ -507,10 +514,9 @@ def api_create_schedule(req: ScheduleCreateRequest):
 @app.delete("/api/schedule/{schedule_id}")
 def api_delete_schedule(schedule_id: str):
     """Remove a schedule."""
-    if schedule_id not in _schedules:
-        raise HTTPException(status_code=404, detail="Schedule not found")
-
     with _schedules_lock:
+        if schedule_id not in _schedules:
+            raise HTTPException(status_code=404, detail="Schedule not found")
         del _schedules[schedule_id]
     _save_schedules()
 
@@ -522,7 +528,9 @@ def api_delete_schedule(schedule_id: str):
 
 @app.post("/api/schedule/{schedule_id}/run")
 def api_run_schedule(schedule_id: str):
-    if schedule_id not in _schedules:
+    with _schedules_lock:
+        schedule = _schedules.get(schedule_id)
+    if schedule is None:
         raise HTTPException(status_code=404, detail="Schedule not found")
     thread = threading.Thread(target=_run_schedule_job, args=[schedule_id], daemon=True)
     thread.start()
@@ -548,16 +556,16 @@ from exif_tagger.db import (
 
 class BatchTagRequest(BaseModel):
     image_ids: list[int] = Field(max_length=500)
-    add_tags: list[str] = []
-    remove_tags: list[str] = []
+    add_tags: list[str] = Field(default=[], max_length=200)
+    remove_tags: list[str] = Field(default=[], max_length=200)
 
 
 class GlobalTagRemoveRequest(BaseModel):
-    tag_name: str
+    tag_name: str = Field(max_length=200)
 
 
 class ImageTagsUpdateRequest(BaseModel):
-    tags: list[str]
+    tags: list[str] = Field(max_length=200)
 
 
 class SingleImageSyncRequest(BaseModel):
@@ -671,9 +679,9 @@ async def api_get_gallery_images(
     request: Request,
     offset: int = Query(default=0, ge=0),
     limit: int = Query(default=50, ge=1, le=200),
-    tags: str | None = None,
-    search: str | None = None,
-    folder: str | None = None,
+    tags: str | None = Query(default=None, max_length=500),
+    search: str | None = Query(default=None, max_length=500),
+    folder: str | None = Query(default=None, max_length=500),
 ):
     """List images with pagination and optional tag/search/folder filtering."""
     import asyncio
@@ -736,8 +744,8 @@ def api_get_gallery_folders(path: str = ""):
             config_path=CONFIG_PATH,
         )
         return data
-    except ValueError as e:
-        raise HTTPException(status_code=403, detail=str(e))
+    except ValueError:
+        raise HTTPException(status_code=403, detail="Access denied: path is outside root directory")
     except Exception as e:
         logger.error("Failed to query gallery folders: %s", e)
         raise HTTPException(status_code=500, detail="Failed to query gallery folders")
@@ -806,10 +814,10 @@ def api_sync_single_image_endpoint(req: SingleImageSyncRequest):
             root_directory=Path(config.root_directory),
         )
         return result
-    except FileNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e))
-    except ValueError as e:
-        raise HTTPException(status_code=403, detail=str(e))
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Image file not found")
+    except ValueError:
+        raise HTTPException(status_code=403, detail="Access denied: path is outside root directory")
     except Exception as e:
         logger.error("Failed to sync image: %s", e)
         raise HTTPException(status_code=500, detail="Failed to sync image")
@@ -821,6 +829,13 @@ def api_get_gallery_image(image_id: int):
     image_data = get_image_by_id(image_id)
     if not image_data:
         raise HTTPException(status_code=404, detail="Image not found")
+    config = load_config(CONFIG_PATH)
+    root_dir = Path(config.root_directory).resolve()
+    resolved = Path(image_data["file_path"]).resolve()
+    try:
+        resolved.relative_to(root_dir)
+    except ValueError:
+        raise HTTPException(status_code=403, detail="Access denied: path is outside root directory")
     return image_data
 
 

@@ -31,6 +31,15 @@ def test_batch_tags_size_capped():
     assert resp.status_code == 422
 
 
+def test_batch_add_tags_count_capped():
+    resp = _client().post(
+        "/api/gallery/batch-tags",
+        json={"image_ids": [1], "add_tags": [f"tag{i}" for i in range(201)]},
+        headers=HEADERS,
+    )
+    assert resp.status_code == 422
+
+
 def test_max_image_pixels_capped():
     from PIL import Image
     assert Image.MAX_IMAGE_PIXELS is not None and Image.MAX_IMAGE_PIXELS <= 50_000_000

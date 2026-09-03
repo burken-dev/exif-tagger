@@ -1,6 +1,7 @@
 """Auth gate tests for /api/* routes."""
 from __future__ import annotations
 
+import pytest
 from fastapi.testclient import TestClient
 
 import exif_tagger.server as server_module
@@ -40,6 +41,27 @@ def test_ui_route_stays_public(monkeypatch):
     monkeypatch.setenv("EXIFTAGGER_API_TOKEN", TOKEN)
     resp = _client().get("/")
     assert resp.status_code == 200
+
+
+@pytest.mark.parametrize("path", [
+    "/api/status",
+    "/api/config",
+    "/api/schedule",
+    "/api/gallery/tags",
+    "/api/gallery/images",
+    "/api/gallery/folders",
+])
+def test_api_routes_require_token(monkeypatch, path):
+    monkeypatch.setenv("EXIFTAGGER_API_TOKEN", TOKEN)
+    resp = _client().get(path)
+    assert resp.status_code == 401
+
+
+@pytest.mark.parametrize("path", ["/docs", "/redoc", "/openapi.json"])
+def test_docs_require_token(monkeypatch, path):
+    monkeypatch.setenv("EXIFTAGGER_API_TOKEN", TOKEN)
+    resp = _client().get(path)
+    assert resp.status_code == 401
 
 
 def test_config_masks_api_key(monkeypatch, tmp_path):

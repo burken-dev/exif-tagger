@@ -85,6 +85,8 @@ python -m exif_tagger --verbose        # per-image logging
 
 Configuration is loaded from `config.yaml` with environment variable overrides (priority order: env vars > YAML values > defaults).
 
+> `config.yaml` is local-only and never committed — copy it from `config.yaml.example`. Prefer passing the model API key via env (`OPENAI_API_KEY` / `EXIFTAGGER_MODEL_API_KEY`) over storing it in the file.
+
 ### config.yaml.example
 
 ```yaml

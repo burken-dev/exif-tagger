@@ -21,6 +21,8 @@ export const Header: React.FC<HeaderProps> = ({ statusText: propStatusText }) =>
         return 'bg-amber-500/10 text-amber-500 border-amber-500/30 animate-pulse';
       case 'stopping...':
         return 'bg-orange-500/10 text-orange-500 border-orange-500/30 animate-pulse';
+      case 'paused':
+        return 'bg-amber-500/10 text-amber-400 border-amber-500/30';
       case 'completed':
         return 'bg-emerald-500/10 text-emerald-500 border-emerald-500/30';
       case 'completed with errors':
@@ -37,6 +39,8 @@ export const Header: React.FC<HeaderProps> = ({ statusText: propStatusText }) =>
         return 'bg-amber-500';
       case 'stopping...':
         return 'bg-orange-500';
+      case 'paused':
+        return 'bg-amber-400';
       case 'completed':
         return 'bg-emerald-500';
       case 'completed with errors':

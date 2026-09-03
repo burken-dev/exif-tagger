@@ -350,6 +350,106 @@ def test_processing_pause_and_resume_button_actions(browser_page: Page):
     assert len(resume_called) == 1, "Expected /api/resume to be called"
 
 
+def test_processing_stop_button_action(browser_page: Page):
+    """Clicking Stop Processing calls /api/stop, transitions UI through Stopping..., and re-enables Start Processing button."""
+    import json
+
+    stop_called = []
+    start_called = []
+
+    current_status = {
+        "running": True,
+        "paused": False,
+        "processed": 2,
+        "total": 10,
+        "currentImage": "image_002.jpg",
+        "progressPct": 20.0,
+        "stopRequested": False,
+        "logs": [],
+        "summary": None,
+    }
+
+    def handle_status(route):
+        route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps(current_status),
+        )
+
+    def handle_stop(route):
+        stop_called.append(True)
+        current_status["stopRequested"] = True
+        route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps({"status": "stopped", "processed": 2}),
+        )
+
+    def handle_start(route):
+        start_called.append(True)
+        current_status["running"] = True
+        current_status["stopRequested"] = False
+        route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps({"status": "started"}),
+        )
+
+    browser_page.route("**/api/status", handle_status)
+    browser_page.route("**/api/stop", handle_stop)
+    browser_page.route("**/api/start", handle_start)
+
+    browser_page.reload(wait_until="networkidle")
+
+    # Verify initial running state: Pause and Stop visible
+    stop_btn = browser_page.locator("button").filter(has_text="Stop Processing")
+    stop_btn.wait_for(state="visible")
+    assert stop_btn.is_enabled()
+
+    pause_btn = browser_page.locator("button").filter(has_text="Pause Processing")
+    assert pause_btn.is_visible()
+    assert pause_btn.is_enabled()
+
+    # Click Stop
+    stop_btn.click()
+    browser_page.wait_for_timeout(300)
+    assert len(stop_called) == 1, "Expected /api/stop to be called"
+
+    # Complete stop on backend
+    current_status["running"] = False
+    current_status["stopRequested"] = False
+    current_status["summary"] = {
+        "root_directory": "/tmp",
+        "total_images_found": 10,
+        "total_processed": 2,
+        "successfully_tagged": 2,
+        "already_tagged": 0,
+        "skipped_by_checkpoint": 0,
+        "failed": 0,
+        "errors": [],
+    }
+
+    # Wait for poll cycle to pick up stopped state
+    browser_page.wait_for_timeout(1500)
+
+    # Verify Start Processing button is restored, Pause button is gone
+    start_btn = browser_page.locator("button").filter(has_text="Start Processing")
+    start_btn.wait_for(state="visible")
+    assert start_btn.is_enabled()
+
+    pause_btn_after = browser_page.locator("button").filter(has_text="Pause Processing")
+    assert pause_btn_after.count() == 0, "Pause button should not be present when stopped"
+
+    # Verify inputs are re-enabled
+    folder_input = browser_page.locator("#folderPath")
+    assert folder_input.is_enabled()
+
+    # Click Start Processing again to verify restart works
+    start_btn.click()
+    browser_page.wait_for_timeout(300)
+    assert len(start_called) == 1, "Expected /api/start to be called on restart"
+
+
 def test_processing_clear_log_persists_on_update(browser_page: Page):
     """Clicking Clear Log clears the view and subsequent status updates do not re-add old logs, only new ones."""
     import json

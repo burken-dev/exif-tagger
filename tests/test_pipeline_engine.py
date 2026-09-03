@@ -1207,12 +1207,72 @@ class TestPipelineEngine3Stage:
         t.join(timeout=5.0)
 
         assert not t.is_alive(), "Pipeline should terminate quickly when stopped"
-        assert engine.state.stop_requested is True
         assert engine.state.running is False
+        assert engine.state.stop_requested is False
         assert len(calls) < 8
         assert result_box["summary"]["total_processed"] == engine.state.processed
         assert result_box["summary"]["successfully_tagged"] == len(calls)
         assert result_box["summary"]["total_processed"] == len(calls)
+
+    def test_pipeline_engine_3_stage_stop_cancellation_large_batch(self, tmp_path):
+        """Verify stopping a session with more images than prefetch queue capacity does not deadlock."""
+        import time
+        from unittest.mock import MagicMock, patch
+
+        import yaml
+        from PIL import Image
+
+        from exif_tagger.main import PipelineEngine
+        from exif_tagger.models.schema import TagResult
+
+        images_dir = tmp_path / "large_stop_images"
+        images_dir.mkdir(exist_ok=True)
+        # Create 25 images (queue maxsize is 8)
+        for i in range(25):
+            p = images_dir / f"stop_{i:02d}.jpg"
+            Image.new("RGB", (30, 30), color="green").save(p, format="JPEG")
+
+        db_path = tmp_path / "large_stop.db"
+        cfg_file = tmp_path / "config.yaml"
+        cfg = {
+            "root_directory": str(images_dir),
+            "model": {
+                "base_url": "https://api.openai.com/v1",
+                "model_name": "model-v1",
+                "api_key": "test",
+                "concurrency": 2,
+            },
+            "tags": {"nature": {"description": "nature scene", "threshold": 0.5}},
+        }
+        cfg_file.write_text(yaml.safe_dump(cfg))
+
+        engine = PipelineEngine(config_path=str(cfg_file))
+        calls = []
+
+        def fake_tag(ai_model, path, target_tags, **kwargs):
+            calls.append(path.name)
+            if len(calls) == 1:
+                engine.stop()
+            time.sleep(0.05)
+            return MagicMock(results=[TagResult(tag_name="nature", score=0.8)])
+
+        result_box = {}
+
+        def run_thread():
+            with patch("exif_tagger.ai_client.setup_secure_logging"):
+                with patch("exif_tagger.ai_client.tag_image_with_ai", side_effect=fake_tag):
+                    with patch("exif_tagger.exif_writer.set_xptags", return_value=True):
+                        with patch("exif_tagger.db.get_db_path", return_value=db_path):
+                            result_box["summary"] = engine.start_session(root_directory=str(images_dir))
+
+        t = threading.Thread(target=run_thread)
+        t.start()
+        t.join(timeout=3.0)
+
+        assert not t.is_alive(), "Pipeline should terminate quickly when stopped without deadlocking on full prefetch queue"
+        assert engine.state.running is False
+        assert engine.state.stop_requested is False
+        assert len(calls) < 25
 
     def test_pipeline_engine_3_stage_writer_fetches_tags_and_drains_inflight(self, tmp_path):
         from unittest.mock import MagicMock, patch

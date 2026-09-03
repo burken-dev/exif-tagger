@@ -13,6 +13,7 @@ export interface SessionCardProps {
   onMaxImagesChange: (max: number | null) => void;
   isRunning: boolean;
   isPaused: boolean;
+  statusText?: string;
   onStart: () => void;
   onPause: () => void;
   onResume: () => void;
@@ -28,13 +29,17 @@ export const SessionCard: React.FC<SessionCardProps> = ({
   onMaxImagesChange,
   isRunning,
   isPaused,
+  statusText,
   onStart,
   onPause,
   onResume,
   onStop,
 }) => {
+  const isStopping = statusText === 'Stopping...';
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (isStopping) return;
     if (!isRunning) {
       onStart();
     } else if (isPaused) {
@@ -164,6 +169,7 @@ export const SessionCard: React.FC<SessionCardProps> = ({
                 type="button"
                 variant="secondary"
                 onClick={onPause}
+                disabled={isStopping}
                 className="flex items-center gap-2 border border-amber-500/40 text-amber-500 hover:bg-amber-500/10"
               >
                 <Pause className="w-4 h-4" />
@@ -174,7 +180,7 @@ export const SessionCard: React.FC<SessionCardProps> = ({
             <Button
               type="button"
               variant="destructive"
-              disabled={!isRunning}
+              disabled={!isRunning || isStopping}
               onClick={onStop}
               className="flex items-center gap-2"
             >

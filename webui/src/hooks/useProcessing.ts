@@ -98,18 +98,24 @@ export function useProcessing() {
 
       const runningState = Boolean(data.running);
       const pausedState = Boolean(data.paused);
+      const stopRequestedState = Boolean(data.stopRequested);
       const prevWasRunning = wasRunningRef.current;
       wasRunningRef.current = runningState;
 
       if (runningState) {
         setIsRunning(true);
-        setIsPaused(pausedState);
-        setStatusText(pausedState ? 'Paused' : 'Running');
+        if (stopRequestedState) {
+          setIsPaused(false);
+          setStatusText('Stopping...');
+        } else {
+          setIsPaused(pausedState);
+          setStatusText(pausedState ? 'Paused' : 'Running');
+        }
         setSummary(data.summary || null);
         setProcessedCount(data.processed || 0);
         setTotalCount(data.total || 0);
         setProgressPct(data.progressPct || 0);
-      } else if (data.stopRequested) {
+      } else if (stopRequestedState) {
         setIsRunning(false);
         setIsPaused(false);
         setStatusText('Stopping...');
@@ -298,6 +304,7 @@ export function useProcessing() {
       if (resp.ok) {
         setStatusText('Stopping...');
         setLogs((prev) => [...prev, { id: Date.now(), text: 'Stop requested.', type: 'info' }]);
+        await fetchStatus();
         return { success: true };
       } else {
         const errData = await resp.json();
@@ -306,7 +313,7 @@ export function useProcessing() {
     } catch (e: any) {
       return { success: false, error: 'Network error: ' + (e.message || 'Unknown error') };
     }
-  }, []);
+  }, [fetchStatus]);
 
   const clearLogs = useCallback(() => {
     setLogs([]);

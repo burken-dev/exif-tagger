@@ -101,6 +101,7 @@ export const ProcessingTab: React.FC = () => {
         onMaxImagesChange={setMaxImages}
         isRunning={isRunning}
         isPaused={isPaused}
+        statusText={statusText}
         onStart={handleStart}
         onPause={handlePause}
         onResume={handleResume}

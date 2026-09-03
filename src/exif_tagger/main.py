@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import logging
 import queue
 import sys
@@ -317,6 +318,7 @@ class ProcessingState:
             self._paused = False
             self._pause_event.set()
             self._current_image = None
+            self._stop_requested = False
             if summary is not None:
                 summary["elapsed_seconds"] = round(self.elapsed_seconds, 2)
                 summary["avg_seconds_per_image"] = round(self.avg_seconds_per_image, 2)
@@ -899,8 +901,16 @@ class PipelineEngine:
 
                 prefetch_thread.join()
 
-                for _ in range(concurrency):
-                    prefetch_queue.put(_PREFETCH_SENTINEL)
+                if self.state.stop_requested:
+                    while not prefetch_queue.empty():
+                        try:
+                            prefetch_queue.get_nowait()
+                        except queue.Empty:
+                            break
+                else:
+                    for _ in range(concurrency):
+                        with contextlib.suppress(queue.Full):
+                            prefetch_queue.put(_PREFETCH_SENTINEL, timeout=1.0)
 
                 for future in inference_futures:
                     try:
@@ -908,8 +918,9 @@ class PipelineEngine:
                     except Exception as exc:
                         logger.error("Unexpected worker error: %s", exc)
 
-                write_queue.put(_WRITE_SENTINEL)
-                writer_thread.join()
+                with contextlib.suppress(queue.Full):
+                    write_queue.put(_WRITE_SENTINEL, timeout=1.0)
+                writer_thread.join(timeout=10.0)
 
             summary = {
                 "root_directory": config.root_directory,

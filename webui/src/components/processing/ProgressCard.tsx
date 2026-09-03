@@ -40,7 +40,9 @@ export const ProgressCard: React.FC<ProgressCardProps> = ({
           <Badge
             variant="outline"
             className={`px-2.5 py-0.5 text-xs font-medium ${
-              isRunning && !isPaused
+              statusText === 'Stopping...'
+                ? 'bg-orange-500/10 text-orange-500 border-orange-500/30 animate-pulse'
+                : isRunning && !isPaused
                 ? 'bg-amber-500/10 text-amber-500 border-amber-500/30'
                 : isPaused
                 ? 'bg-amber-500/10 text-amber-400 border-amber-500/30'
@@ -51,8 +53,9 @@ export const ProgressCard: React.FC<ProgressCardProps> = ({
                 : 'bg-slate-500/10 text-slate-400 border-slate-500/30'
             }`}
           >
-            {isRunning && !isPaused && <Loader2 className="w-3 h-3 mr-1 inline animate-spin" />}
-            {isPaused && <Pause className="w-3 h-3 mr-1 inline" />}
+            {statusText === 'Stopping...' && <Loader2 className="w-3 h-3 mr-1 inline animate-spin" />}
+            {isRunning && !isPaused && statusText !== 'Stopping...' && <Loader2 className="w-3 h-3 mr-1 inline animate-spin" />}
+            {isPaused && statusText !== 'Stopping...' && <Pause className="w-3 h-3 mr-1 inline" />}
             {statusText}
           </Badge>
         </div>

@@ -10,6 +10,7 @@ import io
 import json
 import logging
 import os
+import secrets
 import threading
 import uuid
 from datetime import UTC, datetime
@@ -31,6 +32,23 @@ logger = logging.getLogger(__name__)
 
 
 app = FastAPI(title="EXIF Tagger", version="0.1.0")
+
+
+def _expected_api_token() -> str:
+    return os.environ.get("EXIFTAGGER_API_TOKEN", "")
+
+
+@app.middleware("http")
+async def api_token_middleware(request: Request, call_next):
+    if request.url.path.startswith("/api/"):
+        expected = _expected_api_token()
+        if not expected:
+            return JSONResponse(status_code=503, content={"detail": "Server API token is not configured"})
+        auth = request.headers.get("authorization", "")
+        scheme, _, token = auth.partition(" ")
+        if scheme.lower() != "bearer" or not secrets.compare_digest(token, expected):
+            return JSONResponse(status_code=401, content={"detail": "Invalid or missing API token"})
+    return await call_next(request)
 
 _engine: PipelineEngine | None = None
 _engine_lock = threading.Lock()
@@ -319,7 +337,7 @@ def api_get_config():
                 "model_name": config.ai_model.model_name,
                 "max_tokens": config.ai_model.max_tokens,
                 "temperature": config.ai_model.temperature,
-                "api_key": config.ai_model.api_key or "",
+                "api_key_set": bool(config.ai_model.api_key),
                 "use_structured_outputs": getattr(config.ai_model, "use_structured_outputs", False),
                 "max_image_dimension": getattr(
                     config.ai_model, "max_image_dimension", getattr(config, "max_image_dimension", 720)
@@ -355,6 +373,8 @@ def api_update_config(updates: dict[str, Any]):
         if "model" in updates and isinstance(updates["model"], dict):
             model_section = current.setdefault("model", {})
             for key, val in updates["model"].items():
+                if key == "api_key" and (val is None or (isinstance(val, str) and not val.strip())):
+                    continue  # empty/omitted means "keep the stored key"
                 model_section[key] = val
 
         if "tags" in updates:

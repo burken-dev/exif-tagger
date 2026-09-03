@@ -11,6 +11,7 @@ from exif_tagger.db import get_connection, get_gallery_folders, sync_gallery_ind
 from exif_tagger.main import PipelineEngine
 from exif_tagger.models.schema import TaggingResponse, TagResult
 from exif_tagger.server import app
+from tests.conftest import TEST_API_TOKEN
 
 
 def create_test_image(path: Path):
@@ -181,7 +182,7 @@ def test_validate_and_resolve_subfolder_breakout_attempts(tmp_path: Path):
 def test_api_start_rejects_path_traversal(tmp_path: Path, monkeypatch):
     import exif_tagger.server as server_module
 
-    client = TestClient(app)
+    client = TestClient(app, headers={"Authorization": f"Bearer {TEST_API_TOKEN}"})
 
     engine = server_module._get_engine()
     mock_config = type(

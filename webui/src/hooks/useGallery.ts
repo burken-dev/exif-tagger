@@ -5,6 +5,7 @@ import type {
   FolderBreadcrumb,
   FoldersResponse,
 } from '../types';
+import { apiFetch } from '../lib/api';
 
 export function useGallery() {
   const [images, setImages] = useState<GalleryImage[]>([]);
@@ -139,7 +140,7 @@ export function useGallery() {
   // Fetch Tags
   const fetchGalleryTags = useCallback(async () => {
     try {
-      const resp = await fetch('/api/gallery/tags');
+      const resp = await apiFetch('/api/gallery/tags');
       if (!resp.ok) throw new Error('Failed to fetch gallery tags');
       const data = await resp.json();
       setAllTags(data.tags || []);
@@ -172,7 +173,7 @@ export function useGallery() {
       if (trimmedSearch) url += `&search=${encodeURIComponent(trimmedSearch)}`;
       if (folder) url += `&folder=${encodeURIComponent(folder)}`;
 
-      const resp = await fetch(url, { signal: controller.signal });
+      const resp = await apiFetch(url, { signal: controller.signal });
       if (!resp.ok) throw new Error('Failed to fetch gallery images');
       const data = await resp.json();
 
@@ -213,7 +214,7 @@ export function useGallery() {
     setModalFolder(path);
     setFoldersLoading(true);
     try {
-      const resp = await fetch(`/api/gallery/folders?path=${encodeURIComponent(path)}`);
+      const resp = await apiFetch(`/api/gallery/folders?path=${encodeURIComponent(path)}`);
       if (!resp.ok) throw new Error('Failed to fetch folders');
       const data: FoldersResponse = await resp.json();
       setFoldersResponse(data);
@@ -320,7 +321,7 @@ export function useGallery() {
       }
 
       try {
-        const resp = await fetch('/api/gallery/batch-tags', {
+        const resp = await apiFetch('/api/gallery/batch-tags', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -356,7 +357,7 @@ export function useGallery() {
       }
 
       try {
-        const resp = await fetch('/api/gallery/remove-tag-global', {
+        const resp = await apiFetch('/api/gallery/remove-tag-global', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ tag_name: trimmed }),
@@ -386,7 +387,7 @@ export function useGallery() {
         return { success: false, error: 'Cannot update tags on unindexed image' };
       }
       try {
-        const resp = await fetch(`/api/gallery/image/${imageId}/tags`, {
+        const resp = await apiFetch(`/api/gallery/image/${imageId}/tags`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ tags }),
@@ -424,7 +425,7 @@ export function useGallery() {
     }
     setImageDetailLoading(true);
     try {
-      const resp = await fetch(`/api/gallery/image/${imageOrId}`);
+      const resp = await apiFetch(`/api/gallery/image/${imageOrId}`);
       if (!resp.ok) throw new Error('Image not found');
       const data: GalleryImage = await resp.json();
       setSelectedImageDetail(data);
@@ -450,7 +451,7 @@ export function useGallery() {
       while (true) {
         await new Promise((resolve) => setTimeout(resolve, 800));
         try {
-          const resp = await fetch('/api/gallery/sync/status');
+          const resp = await apiFetch('/api/gallery/sync/status');
           if (resp.ok) {
             const data = await resp.json();
             if (data.status === 'complete') {
@@ -476,7 +477,7 @@ export function useGallery() {
     async (mode?: 'all' | 'filtered') => {
       setIsSyncing(true);
       try {
-        const resp = await fetch('/api/gallery/sync', {
+        const resp = await apiFetch('/api/gallery/sync', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -509,7 +510,7 @@ export function useGallery() {
   const syncSingleImage = useCallback(
     async (relativePath: string) => {
       try {
-        const resp = await fetch('/api/gallery/image/sync', {
+        const resp = await apiFetch('/api/gallery/image/sync', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ relative_path: relativePath }),
@@ -538,7 +539,7 @@ export function useGallery() {
   useEffect(() => {
     const checkInitialSyncStatus = async () => {
       try {
-        const resp = await fetch('/api/gallery/sync/status');
+        const resp = await apiFetch('/api/gallery/sync/status');
         if (resp.ok) {
           const data = await resp.json();
           if (data.status === 'running') {

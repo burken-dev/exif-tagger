@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import type { ScheduleItem, CreateSchedulePayload } from '../types';
+import { apiFetch } from '../lib/api';
 
 export function useSchedule() {
   const [schedules, setSchedules] = useState<ScheduleItem[]>([]);
@@ -10,7 +11,7 @@ export function useSchedule() {
     setLoading(true);
     setError(null);
     try {
-      const resp = await fetch('/api/schedule');
+      const resp = await apiFetch('/api/schedule');
       if (!resp.ok) throw new Error('Failed to load schedules');
       const data: ScheduleItem[] = await resp.json();
       setSchedules(data || []);
@@ -28,7 +29,7 @@ export function useSchedule() {
 
   const runSchedule = useCallback(async (id: string | number) => {
     try {
-      const resp = await fetch(`/api/schedule/${id}/run`, { method: 'POST' });
+      const resp = await apiFetch(`/api/schedule/${id}/run`, { method: 'POST' });
       if (!resp.ok) {
         const errData = await resp.json();
         return { success: false, error: errData.detail || 'Failed to run schedule' };
@@ -42,7 +43,7 @@ export function useSchedule() {
   const deleteSchedule = useCallback(
     async (id: string | number) => {
       try {
-        const resp = await fetch(`/api/schedule/${id}`, { method: 'DELETE' });
+        const resp = await apiFetch(`/api/schedule/${id}`, { method: 'DELETE' });
         if (!resp.ok) {
           const errData = await resp.json();
           return { success: false, error: errData.detail || 'Failed to delete schedule' };
@@ -63,7 +64,7 @@ export function useSchedule() {
       }
 
       try {
-        const resp = await fetch('/api/schedule', {
+        const resp = await apiFetch('/api/schedule', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(job),

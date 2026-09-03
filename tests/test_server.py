@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient
 # Import the app — we'll patch dependencies at module level
 import exif_tagger.server as server_module
 from exif_tagger.models.schema import ScheduleModel
+from tests.conftest import TEST_API_TOKEN
 
 
 @pytest.fixture(autouse=True)
@@ -31,7 +32,7 @@ def _reset_server_state():
 @pytest.fixture
 def client(_reset_server_state):
     """Create a test client."""
-    return TestClient(server_module.app)
+    return TestClient(server_module.app, headers={"Authorization": f"Bearer {TEST_API_TOKEN}"})
 
 
 class TestApiStatus:
@@ -610,7 +611,7 @@ def test_poll_refreshes_index_and_reads(tmp_path):
         with (
             patch("exif_tagger.server.load_config", return_value=dummy_config),
             patch("exif_tagger.server.CONFIG_PATH", str(tmp_path / "config.yaml")),
-            TestClient(server_module.app) as client,
+            TestClient(server_module.app, headers={"Authorization": f"Bearer {TEST_API_TOKEN}"}) as client,
         ):
             # Startup reconcile seeded the index.
             assert client.get("/api/gallery/images").json()["total"] == 1

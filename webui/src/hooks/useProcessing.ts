@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import type { LogItem, ProcessingStatus, FolderItem, FolderBreadcrumb, FoldersResponse } from '../types';
+import { apiFetch } from '../lib/api';
 
 export function useProcessing() {
   const [isRunning, setIsRunning] = useState<boolean>(false);
@@ -40,7 +41,7 @@ export function useProcessing() {
 
   // Fetch root_directory from config
   useEffect(() => {
-    fetch('/api/config')
+    apiFetch('/api/config')
       .then((res) => res.json())
       .then((data) => {
         if (data && data.root_directory) {
@@ -73,7 +74,7 @@ export function useProcessing() {
     if (isRunning) return;
     let cancelled = false;
     const url = `/api/gallery/images?limit=1${folderPath ? `&folder=${encodeURIComponent(folderPath)}` : ''}`;
-    fetch(url)
+    apiFetch(url)
       .then((res) => res.json())
       .then((data) => {
         if (!cancelled && typeof data.total === 'number') {
@@ -92,7 +93,7 @@ export function useProcessing() {
 
   const fetchStatus = useCallback(async () => {
     try {
-      const resp = await fetch('/api/status');
+      const resp = await apiFetch('/api/status');
       if (!resp.ok) return;
       const data: ProcessingStatus = await resp.json();
 
@@ -231,7 +232,7 @@ export function useProcessing() {
       const targetMax = overrideMaxImages !== undefined ? overrideMaxImages : maxImages;
 
       try {
-        const resp = await fetch('/api/start', {
+        const resp = await apiFetch('/api/start', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -268,7 +269,7 @@ export function useProcessing() {
 
   const pauseProcessing = useCallback(async () => {
     try {
-      const resp = await fetch('/api/pause', { method: 'POST' });
+      const resp = await apiFetch('/api/pause', { method: 'POST' });
       if (resp.ok) {
         setIsPaused(true);
         setStatusText('Paused');
@@ -284,7 +285,7 @@ export function useProcessing() {
 
   const resumeProcessing = useCallback(async () => {
     try {
-      const resp = await fetch('/api/resume', { method: 'POST' });
+      const resp = await apiFetch('/api/resume', { method: 'POST' });
       if (resp.ok) {
         setIsPaused(false);
         setStatusText('Running');
@@ -300,7 +301,7 @@ export function useProcessing() {
 
   const stopProcessing = useCallback(async () => {
     try {
-      const resp = await fetch('/api/stop', { method: 'POST' });
+      const resp = await apiFetch('/api/stop', { method: 'POST' });
       if (resp.ok) {
         setStatusText('Stopping...');
         setLogs((prev) => [...prev, { id: Date.now(), text: 'Stop requested.', type: 'info' }]);
@@ -323,7 +324,7 @@ export function useProcessing() {
     setModalFolder(path);
     setFoldersLoading(true);
     try {
-      const resp = await fetch(`/api/gallery/folders?path=${encodeURIComponent(path)}`);
+      const resp = await apiFetch(`/api/gallery/folders?path=${encodeURIComponent(path)}`);
       if (!resp.ok) throw new Error('Failed to fetch folders');
       const data: FoldersResponse = await resp.json();
       setFolders(data.folders || []);

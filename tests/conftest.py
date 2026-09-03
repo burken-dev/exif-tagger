@@ -9,6 +9,14 @@ from unittest.mock import MagicMock
 import pytest
 from PIL import Image
 
+TEST_API_TOKEN = "test-token-xyz"
+
+
+@pytest.fixture(autouse=True)
+def _set_test_api_token(monkeypatch: pytest.MonkeyPatch):
+    """All API tests run with auth configured."""
+    monkeypatch.setenv("EXIFTAGGER_API_TOKEN", TEST_API_TOKEN)
+
 # ---------------------------------------------------------------------------
 # Fixture to isolate SQLite database per test
 # ---------------------------------------------------------------------------

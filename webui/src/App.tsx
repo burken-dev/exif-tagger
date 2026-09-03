@@ -7,8 +7,18 @@ import { ProcessingTab } from '@/components/processing/ProcessingTab';
 import { GalleryTab } from '@/components/gallery/GalleryTab';
 import { ConfigTab } from '@/components/config/ConfigTab';
 import { ScheduleTab } from '@/components/schedule/ScheduleTab';
+import { ApiTokenPrompt } from '@/components/layout/ApiTokenPrompt';
+import { getApiToken } from '@/lib/api';
 
 export function AppContent() {
+  const [tokenPromptOpen, setTokenPromptOpen] = useState<boolean>(() => !getApiToken());
+
+  useEffect(() => {
+    const handleUnauthorized = () => setTokenPromptOpen(true);
+    window.addEventListener('api-unauthorized', handleUnauthorized);
+    return () => window.removeEventListener('api-unauthorized', handleUnauthorized);
+  }, []);
+
   const [activeTab, setActiveTab] = useState<TabType>(() => {
     const hash = window.location.hash.toLowerCase();
     if (hash.includes('gallery')) return 'gallery';
@@ -59,6 +69,7 @@ export function AppContent() {
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
         {renderTabContent()}
       </main>
+      <ApiTokenPrompt open={tokenPromptOpen} />
     </div>
   );
 }

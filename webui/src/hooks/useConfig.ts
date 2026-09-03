@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import type { AppConfig } from '../types';
+import { apiFetch } from '../lib/api';
 
 export function useConfig() {
   const [config, setConfig] = useState<AppConfig | null>(null);
@@ -11,7 +12,7 @@ export function useConfig() {
     setLoading(true);
     setMessage(null);
     try {
-      const resp = await fetch('/api/config');
+      const resp = await apiFetch('/api/config');
       if (!resp.ok) throw new Error('Failed to fetch config');
       const data: AppConfig = await resp.json();
       setConfig(data);
@@ -31,7 +32,7 @@ export function useConfig() {
     setSaving(true);
     setMessage(null);
     try {
-      const resp = await fetch('/api/config', {
+      const resp = await apiFetch('/api/config', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(newConfig),

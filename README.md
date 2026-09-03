@@ -60,6 +60,10 @@ mkdir -p data
 cp config.yaml.example data/config.yaml
 # Edit data/config.yaml: set root_directory, model endpoint, API key
 
+# Generate the shared API token and export it (required — every /api/* route
+# returns 401/503 without it):
+export EXIFTAGGER_API_TOKEN="$(openssl rand -hex 32)"
+
 # Run with docker-compose
 docker compose run --rm exif-tagger
 # Or with verbose output:
@@ -122,6 +126,15 @@ All config values can be overridden with `EXIFTAGGER_` prefixed variables:
 | `EXIFTAGGER_MODEL_MODEL_NAME` | model.model_name | `llava` | Model identifier |
 | `EXIFTAGGER_MODEL_API_KEY` | model.api_key | `sk-...` | API key for vision model endpoint |
 | `OPENAI_API_KEY` (standard) | model.api_key fallback | `sk-...` | Standard OpenAI API key environment fallback |
+
+### API authentication
+
+The server requires `EXIFTAGGER_API_TOKEN` to be set; every `/api/*` route
+returns `503` when it is unset and `401` for a missing/wrong `Authorization:
+Bearer <token>` header. The browser prompts for the token once and stores it
+in `localStorage` (`exif_tagger_api_token`). `GET /api/config` never returns
+the model API key — it reports `model.api_key_set: bool` instead, and `PUT
+/api/config` keeps the stored key when `model.api_key` is omitted or empty.
 
 ## 🖥️ CLI Reference
 

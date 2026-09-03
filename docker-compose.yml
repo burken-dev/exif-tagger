@@ -10,6 +10,7 @@ services:
     environment:
       EXIFTAGGER_DATA_DIR: "/app/data"
       EXIFTAGGER_ROOT_DIRECTORY: "/data/images"
+      EXIFTAGGER_API_TOKEN: "${EXIFTAGGER_API_TOKEN:-}"   # REQUIRED: shared bearer token for /api/* (generate: openssl rand -hex 32)
       # Uncomment and set if you want to override api_key via env:
       # OPENAI_API_KEY: "sk-your-key-here"
 

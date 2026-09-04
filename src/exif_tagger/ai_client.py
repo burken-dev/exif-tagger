@@ -15,6 +15,8 @@ from typing import Any
 from openai import OpenAI
 from PIL import Image
 
+Image.MAX_IMAGE_PIXELS = 50_000_000
+
 _CLIENT_CACHE: dict[tuple[str, str], OpenAI] = {}
 _CLIENT_CACHE_LOCK = threading.Lock()
 
@@ -72,6 +74,25 @@ class SecretRedactor(logging.Filter):
         return True
 
 
+class SecretRedactingFormatter(logging.Formatter):
+    """Formatter that redacts secrets from the formatted message.
+
+    Replaces SecretRedactor-as-Filter: filters mutate the shared LogRecord,
+    corrupting output for other handlers. Formatting first and redacting the
+    string is side-effect free.
+    """
+
+    def __init__(self, *args: object, **kwargs: object):
+        super().__init__(*args, **kwargs)  # type: ignore[arg-type]
+        self._compiled = [re.compile(p) for p in SecretRedactor.SECRET_PATTERNS]
+
+    def format(self, record: logging.LogRecord) -> str:
+        msg = super().format(record)
+        for pattern in self._compiled:
+            msg = pattern.sub("[REDACTED]", msg)
+        return msg
+
+
 def setup_secure_logging(
     level: int | str = logging.INFO,
     log_dir: str = "/app/logs",
@@ -87,12 +108,10 @@ def setup_secure_logging(
             handler.setLevel(log_level)
         return
 
-    formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s", datefmt="%H:%M:%S")
-    redactor = SecretRedactor()
+    formatter = SecretRedactingFormatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s", datefmt="%H:%M:%S")
 
     stream_handler = logging.StreamHandler()
     stream_handler.setFormatter(formatter)
-    stream_handler.addFilter(redactor)
     stream_handler.setLevel(log_level)
     main_logger.addHandler(stream_handler)
 
@@ -107,7 +126,6 @@ def setup_secure_logging(
             encoding="utf-8",
         )
         file_handler.setFormatter(formatter)
-        file_handler.addFilter(redactor)
         file_handler.setLevel(log_level)
         main_logger.addHandler(file_handler)
     except (OSError, PermissionError) as exc:

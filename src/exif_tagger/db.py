@@ -611,6 +611,10 @@ def sync_single_image(
     p = Path(relative_or_abs_path)
 
     img_path = p.resolve() if p.is_absolute() else (root_path / p).resolve()
+    try:
+        img_path.relative_to(root_path)
+    except ValueError:
+        raise ValueError(f"Path is outside root directory: {img_path}")
 
     if not img_path.exists():
         raise FileNotFoundError(f"Image file not found: {img_path}")
@@ -686,6 +690,10 @@ def get_gallery_folders(
 
     root_path = Path(root_directory).resolve()
     target_dir = (root_path / clean_rel).resolve() if clean_rel else root_path
+    try:
+        target_dir.relative_to(root_path)
+    except ValueError:
+        raise ValueError(f"Path is outside root directory: {relative_path}")
 
     # Get all subfolders from disk (includes unindexed folders)
     all_subfolders: set[str] = set()

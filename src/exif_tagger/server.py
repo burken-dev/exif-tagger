@@ -6,10 +6,12 @@ Runs as a long-lived service (uvicorn) instead of CLI batch execution.
 
 from __future__ import annotations
 
+import contextlib
 import io
 import json
 import logging
 import os
+import secrets
 import threading
 import uuid
 from datetime import UTC, datetime
@@ -17,12 +19,16 @@ from pathlib import Path
 from typing import Any
 
 from apscheduler.schedulers.background import BackgroundScheduler
-from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi import FastAPI, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse, JSONResponse
 from PIL import Image
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
-from exif_tagger.ai_client import SecretRedactor, setup_secure_logging
+Image.MAX_IMAGE_PIXELS = 50_000_000
+
+MAX_INLINE_IMAGE_BYTES = 100_000_000
+
+from exif_tagger.ai_client import SecretRedactingFormatter, setup_secure_logging
 from exif_tagger.config import get_config_path, load_config
 from exif_tagger.main import PipelineEngine, validate_and_resolve_subfolder
 from exif_tagger.models.schema import IMAGE_EXTENSIONS, ScheduleModel, TagDefinition
@@ -32,8 +38,26 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(title="EXIF Tagger", version="0.1.0")
 
+
+def _expected_api_token() -> str:
+    return os.environ.get("EXIFTAGGER_API_TOKEN", "")
+
+
+@app.middleware("http")
+async def api_token_middleware(request: Request, call_next):
+    if request.url.path.startswith("/api/") or request.url.path in ("/docs", "/redoc", "/openapi.json"):
+        expected = _expected_api_token()
+        if not expected:
+            return JSONResponse(status_code=503, content={"detail": "Server API token is not configured"})
+        auth = request.headers.get("authorization", "")
+        scheme, _, token = auth.partition(" ")
+        if scheme.lower() != "bearer" or not secrets.compare_digest(token, expected):
+            return JSONResponse(status_code=401, content={"detail": "Invalid or missing API token"})
+    return await call_next(request)
+
 _engine: PipelineEngine | None = None
 _engine_lock = threading.Lock()
+_schedules_lock = threading.RLock()
 _schedules: dict[str, ScheduleModel] = {}
 _scheduler: BackgroundScheduler | None = None
 _config_dir = Path(__file__).resolve().parent.parent.parent
@@ -58,17 +82,15 @@ SERVER_LOG_DIR = _config_dir / "server-log"
 SERVER_LOG_DIR.mkdir(parents=True, exist_ok=True)
 
 
-_log_formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
+_log_formatter = SecretRedactingFormatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
 
 _error_file_handler = logging.FileHandler(SERVER_LOG_DIR / "error.log")
 _error_file_handler.setLevel(logging.ERROR)
 _error_file_handler.setFormatter(_log_formatter)
-_error_file_handler.addFilter(SecretRedactor())
 
 _server_file_handler = logging.FileHandler(SERVER_LOG_DIR / "server.log")
 _server_file_handler.setLevel(logging.INFO)
 _server_file_handler.setFormatter(_log_formatter)
-_server_file_handler.addFilter(SecretRedactor())
 
 _root_logger = logging.getLogger()
 _root_logger.addHandler(_error_file_handler)
@@ -111,11 +133,22 @@ def _load_schedules() -> dict[str, ScheduleModel]:
 
 
 def _save_schedules() -> None:
-    """Persist schedules to disk."""
+    """Persist schedules to disk (atomic replace, crash-safe)."""
+    import tempfile
+
     schedules_file = get_schedules_file_path()
     schedules_file.parent.mkdir(parents=True, exist_ok=True)
-    with open(schedules_file, "w") as f:
-        json.dump({sid: s.model_dump() for sid, s in _schedules.items()}, f, indent=2)
+    with _schedules_lock:
+        payload = {sid: s.model_dump() for sid, s in _schedules.items()}
+    fd, tmp_name = tempfile.mkstemp(dir=str(schedules_file.parent), prefix=".schedules.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w") as f:
+            json.dump(payload, f, indent=2)
+        os.replace(tmp_name, schedules_file)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.unlink(tmp_name)
+        raise
 
 
 def _compute_next_run(schedule: ScheduleModel) -> str | None:
@@ -144,21 +177,27 @@ def _compute_next_run(schedule: ScheduleModel) -> str | None:
 def _run_schedule_job(schedule_id: str) -> None:
     """Execute a scheduled job."""
     global _engine
-    schedule = _schedules.get(schedule_id)
+    with _schedules_lock:
+        schedule = _schedules.get(schedule_id)
     if not schedule or not schedule.enabled:
         return
 
     logger.info("Running scheduled job: %s (folder=%s)", schedule.name, schedule.folder)
 
-    job_engine = PipelineEngine(config_path=CONFIG_PATH, verbose=False)
-    summary = job_engine.start_session(
-        root_directory=schedule.folder,
-        max_images=schedule.max_images,
-    )
-
+    try:
+        job_engine = PipelineEngine(config_path=CONFIG_PATH, verbose=False)
+        summary = job_engine.start_session(
+            root_directory=schedule.folder,
+            max_images=schedule.max_images,
+        )
+        status = "success" if not summary.get("errors") else "failed"
+    except Exception as exc:
+        logger.error("Scheduled job '%s' failed: %s", schedule_id, exc, exc_info=True)
+        status = "failed"
     now = datetime.now(UTC).isoformat()
-    schedule.last_run_at = now
-    schedule.last_status = "success" if not summary.get("errors") else "failed"
+    with _schedules_lock:
+        schedule.last_run_at = now
+        schedule.last_status = status
     _save_schedules()
 
 
@@ -171,8 +210,9 @@ def _setup_scheduler() -> None:
         logger.info("Shutting down existing scheduler before rebuild")
         _scheduler.shutdown(wait=False)
 
-    _schedules.clear()
-    _schedules.update(_load_schedules())
+    with _schedules_lock:
+        _schedules.clear()
+        _schedules.update(_load_schedules())
 
     from apscheduler.triggers.cron import CronTrigger
     from apscheduler.triggers.interval import IntervalTrigger
@@ -180,7 +220,9 @@ def _setup_scheduler() -> None:
     _scheduler = BackgroundScheduler(timezone=UTC)
     _scheduler.start()
 
-    for sid, schedule in _schedules.items():
+    with _schedules_lock:
+        _schedules_snapshot = list(_schedules.items())
+    for sid, schedule in _schedules_snapshot:
         if not schedule.enabled:
             continue
 
@@ -230,7 +272,7 @@ async def global_exception_handler(request: Request, exc: Exception):
     logger.error("Unhandled exception processing request %s %s: %s", request.method, request.url, exc, exc_info=True)
     return JSONResponse(
         status_code=500,
-        content={"detail": f"Internal server error: {exc}"},
+        content={"detail": "Internal server error"},
     )
 
 
@@ -319,7 +361,7 @@ def api_get_config():
                 "model_name": config.ai_model.model_name,
                 "max_tokens": config.ai_model.max_tokens,
                 "temperature": config.ai_model.temperature,
-                "api_key": config.ai_model.api_key or "",
+                "api_key_set": bool(config.ai_model.api_key),
                 "use_structured_outputs": getattr(config.ai_model, "use_structured_outputs", False),
                 "max_image_dimension": getattr(
                     config.ai_model, "max_image_dimension", getattr(config, "max_image_dimension", 720)
@@ -335,7 +377,8 @@ def api_get_config():
             "log_dir": getattr(config, "log_dir", "/app/logs"),
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to load config: {e}")
+        logger.error("Failed to load config: %s", e)
+        raise HTTPException(status_code=500, detail="Failed to load config")
 
 
 @app.put("/api/config")
@@ -355,6 +398,8 @@ def api_update_config(updates: dict[str, Any]):
         if "model" in updates and isinstance(updates["model"], dict):
             model_section = current.setdefault("model", {})
             for key, val in updates["model"].items():
+                if key == "api_key" and (val is None or (isinstance(val, str) and not val.strip())):
+                    continue  # empty/omitted means "keep the stored key"
                 model_section[key] = val
 
         if "tags" in updates:
@@ -376,6 +421,17 @@ def api_update_config(updates: dict[str, Any]):
         if "log_dir" in updates:
             current["log_dir"] = updates["log_dir"]
 
+        from urllib.parse import urlparse
+
+        model_section = current.get("model") or {}
+        if "base_url" in model_section:
+            parts = urlparse(str(model_section["base_url"]))
+            if parts.scheme not in ("http", "https") or not parts.hostname or parts.username or parts.password:
+                raise HTTPException(status_code=400, detail="model.base_url must be an http(s) URL without credentials")
+
+        if "log_dir" in current and not Path(str(current["log_dir"])).is_absolute():
+            raise HTTPException(status_code=400, detail="log_dir must be an absolute path")
+
         from exif_tagger.models.schema import Config as SchemaConfig
 
         validated = SchemaConfig(**current)
@@ -387,6 +443,8 @@ def api_update_config(updates: dict[str, Any]):
 
         return {"status": "updated"}
 
+    except HTTPException:
+        raise
     except Exception as e:
         # Format Pydantic validation errors into a human-readable message
         error_detail = str(e)
@@ -411,7 +469,9 @@ def api_update_config(updates: dict[str, Any]):
 def api_list_schedules():
     """List all configured schedules with computed next_run_at."""
     result = []
-    for sid, schedule in _schedules.items():
+    with _schedules_lock:
+        items = list(_schedules.items())
+    for sid, schedule in items:
         entry_data = schedule.model_dump()
         entry_data["next_run_at"] = _compute_next_run(schedule)
         result.append(entry_data)
@@ -421,6 +481,13 @@ def api_list_schedules():
 @app.post("/api/schedule")
 def api_create_schedule(req: ScheduleCreateRequest):
     """Add a new processing schedule."""
+    engine = _get_engine()
+    config = engine._load_config()
+    base_gallery_root = Path(config.root_directory).resolve()
+    try:
+        validate_and_resolve_subfolder(req.folder, base_gallery_root)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     sid = f"schedule_{uuid.uuid4().hex[:8]}"
 
     schedule = ScheduleModel(
@@ -433,7 +500,8 @@ def api_create_schedule(req: ScheduleCreateRequest):
         enabled=req.enabled,
     )
 
-    _schedules[sid] = schedule
+    with _schedules_lock:
+        _schedules[sid] = schedule
     _save_schedules()
 
     # Add to scheduler if enabled
@@ -446,10 +514,10 @@ def api_create_schedule(req: ScheduleCreateRequest):
 @app.delete("/api/schedule/{schedule_id}")
 def api_delete_schedule(schedule_id: str):
     """Remove a schedule."""
-    if schedule_id not in _schedules:
-        raise HTTPException(status_code=404, detail="Schedule not found")
-
-    del _schedules[schedule_id]
+    with _schedules_lock:
+        if schedule_id not in _schedules:
+            raise HTTPException(status_code=404, detail="Schedule not found")
+        del _schedules[schedule_id]
     _save_schedules()
 
     # Rebuild scheduler without this job
@@ -460,7 +528,9 @@ def api_delete_schedule(schedule_id: str):
 
 @app.post("/api/schedule/{schedule_id}/run")
 def api_run_schedule(schedule_id: str):
-    if schedule_id not in _schedules:
+    with _schedules_lock:
+        schedule = _schedules.get(schedule_id)
+    if schedule is None:
         raise HTTPException(status_code=404, detail="Schedule not found")
     thread = threading.Thread(target=_run_schedule_job, args=[schedule_id], daemon=True)
     thread.start()
@@ -485,17 +555,17 @@ from exif_tagger.db import (
 
 
 class BatchTagRequest(BaseModel):
-    image_ids: list[int]
-    add_tags: list[str] = []
-    remove_tags: list[str] = []
+    image_ids: list[int] = Field(max_length=500)
+    add_tags: list[str] = Field(default=[], max_length=200)
+    remove_tags: list[str] = Field(default=[], max_length=200)
 
 
 class GlobalTagRemoveRequest(BaseModel):
-    tag_name: str
+    tag_name: str = Field(max_length=200)
 
 
 class ImageTagsUpdateRequest(BaseModel):
-    tags: list[str]
+    tags: list[str] = Field(max_length=200)
 
 
 class SingleImageSyncRequest(BaseModel):
@@ -607,11 +677,11 @@ def api_gallery_sync_status():
 @app.get("/api/gallery/images")
 async def api_get_gallery_images(
     request: Request,
-    offset: int = 0,
-    limit: int = 50,
-    tags: str | None = None,
-    search: str | None = None,
-    folder: str | None = None,
+    offset: int = Query(default=0, ge=0),
+    limit: int = Query(default=50, ge=1, le=200),
+    tags: str | None = Query(default=None, max_length=500),
+    search: str | None = Query(default=None, max_length=500),
+    folder: str | None = Query(default=None, max_length=500),
 ):
     """List images with pagination and optional tag/search/folder filtering."""
     import asyncio
@@ -653,7 +723,8 @@ async def api_get_gallery_images(
             "limit": limit,
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to query gallery images: {e}")
+        logger.error("Failed to query gallery images: %s", e)
+        raise HTTPException(status_code=500, detail="Failed to query gallery images")
     finally:
         cancelled_event.set()
         if not monitor_task.done():
@@ -673,8 +744,11 @@ def api_get_gallery_folders(path: str = ""):
             config_path=CONFIG_PATH,
         )
         return data
+    except ValueError:
+        raise HTTPException(status_code=403, detail="Access denied: path is outside root directory")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to query gallery folders: {e}")
+        logger.error("Failed to query gallery folders: %s", e)
+        raise HTTPException(status_code=500, detail="Failed to query gallery folders")
 
 
 @app.get("/api/gallery/tags")
@@ -684,7 +758,8 @@ def api_get_gallery_tags():
         tag_names = get_all_tags()
         return {"tags": tag_names}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to fetch gallery tags: {e}")
+        logger.error("Failed to fetch gallery tags: %s", e)
+        raise HTTPException(status_code=500, detail="Failed to fetch gallery tags")
 
 
 @app.get("/api/gallery/image/file")
@@ -694,7 +769,8 @@ def api_get_gallery_image_file_by_path(path: str):
         config = load_config(CONFIG_PATH)
         root_dir = Path(config.root_directory).resolve()
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to load config: {e}")
+        logger.error("Failed to load config for image file: %s", e)
+        raise HTTPException(status_code=500, detail="Failed to load config")
 
     p = Path(path)
     resolved_path = p.resolve() if p.is_absolute() else (root_dir / p).resolve()
@@ -709,6 +785,9 @@ def api_get_gallery_image_file_by_path(path: str):
 
     if resolved_path.suffix.lower() not in IMAGE_EXTENSIONS:
         raise HTTPException(status_code=400, detail="Invalid image file extension")
+
+    if resolved_path.stat().st_size > MAX_INLINE_IMAGE_BYTES:
+        raise HTTPException(status_code=413, detail="Image file too large to serve inline")
 
     if resolved_path.suffix.lower() in (".heic", ".heif"):
         with Image.open(resolved_path) as img:
@@ -735,10 +814,13 @@ def api_sync_single_image_endpoint(req: SingleImageSyncRequest):
             root_directory=Path(config.root_directory),
         )
         return result
-    except FileNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Image file not found")
+    except ValueError:
+        raise HTTPException(status_code=403, detail="Access denied: path is outside root directory")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to sync image: {e}")
+        logger.error("Failed to sync image: %s", e)
+        raise HTTPException(status_code=500, detail="Failed to sync image")
 
 
 @app.get("/api/gallery/image/{image_id}")
@@ -747,6 +829,13 @@ def api_get_gallery_image(image_id: int):
     image_data = get_image_by_id(image_id)
     if not image_data:
         raise HTTPException(status_code=404, detail="Image not found")
+    config = load_config(CONFIG_PATH)
+    root_dir = Path(config.root_directory).resolve()
+    resolved = Path(image_data["file_path"]).resolve()
+    try:
+        resolved.relative_to(root_dir)
+    except ValueError:
+        raise HTTPException(status_code=403, detail="Access denied: path is outside root directory")
     return image_data
 
 
@@ -757,9 +846,21 @@ def api_get_gallery_image_file(image_id: int):
     if not image_data:
         raise HTTPException(status_code=404, detail="Image not found")
 
-    file_path = Path(image_data["file_path"])
+    config = load_config(CONFIG_PATH)
+    root_dir = Path(config.root_directory).resolve()
+    resolved = Path(image_data["file_path"]).resolve()
+    try:
+        resolved.relative_to(root_dir)
+    except ValueError:
+        raise HTTPException(status_code=403, detail="Access denied: path is outside root directory")
+    if resolved.suffix.lower() not in IMAGE_EXTENSIONS:
+        raise HTTPException(status_code=400, detail="Invalid image file extension")
+    file_path = resolved
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="Image file does not exist on disk")
+
+    if file_path.stat().st_size > MAX_INLINE_IMAGE_BYTES:
+        raise HTTPException(status_code=413, detail="Image file too large to serve inline")
 
     if file_path.suffix.lower() in (".heic", ".heif"):
         with Image.open(file_path) as img:
@@ -788,7 +889,8 @@ def api_update_gallery_image_tags(image_id: int, req: ImageTagsUpdateRequest):
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to update image tags: {e}")
+        logger.error("Failed to update image tags: %s", e)
+        raise HTTPException(status_code=500, detail="Failed to update image tags")
 
 
 @app.post("/api/gallery/batch-tags")
@@ -804,7 +906,8 @@ def api_batch_update_tags(req: BatchTagRequest):
         )
         return {"status": "success", "modified": modified}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed batch update: {e}")
+        logger.error("Failed batch update: %s", e)
+        raise HTTPException(status_code=500, detail="Failed batch update")
 
 
 @app.post("/api/gallery/remove-tag-global")
@@ -818,7 +921,8 @@ def api_remove_tag_global(req: GlobalTagRemoveRequest):
         )
         return {"status": "success", "modified": modified}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to remove tag globally: {e}")
+        logger.error("Failed to remove tag globally: %s", e)
+        raise HTTPException(status_code=500, detail="Failed to remove tag globally")
 
 
 @app.get("/api/gallery/image/{image_id}/suppressions")
@@ -830,7 +934,8 @@ def api_get_gallery_image_suppressions(image_id: int):
         suppressions = get_image_suppressions(image_id)
         return {"suppressions": suppressions}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to fetch suppressions: {e}")
+        logger.error("Failed to fetch suppressions: %s", e)
+        raise HTTPException(status_code=500, detail="Failed to fetch suppressions")
 
 
 @app.delete("/api/gallery/image/{image_id}/suppressions/{tag_name}")
@@ -842,7 +947,8 @@ def api_delete_gallery_image_suppression(image_id: int, tag_name: str):
         remove_user_suppression(image_id, tag_name)
         return {"status": "removed"}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to remove suppression: {e}")
+        logger.error("Failed to remove suppression: %s", e)
+        raise HTTPException(status_code=500, detail="Failed to remove suppression")
 
 
 from fastapi.staticfiles import StaticFiles

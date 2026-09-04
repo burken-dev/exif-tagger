@@ -297,3 +297,15 @@ class TestGetConfigPath:
         config_file = data_dir / "config.yaml"
         assert config_file.exists()
         assert config.root_directory == str(tmp_path)
+
+
+def test_exclude_pattern_length_capped():
+    from exif_tagger.models.schema import Config
+
+    cfg = Config(
+        root_directory="/tmp",
+        model={"base_url": "http://x/v1", "model_name": "m"},
+        exclude_patterns=["a" * 201],
+    )
+    with pytest.raises(ValueError, match="too long"):
+        cfg.validate_exclude_patterns()

@@ -72,6 +72,7 @@ export interface ModelConfig {
   max_tokens: number;
   temperature: number;
   api_key?: string;
+  api_key_set?: boolean;
   use_structured_outputs?: boolean;
   max_image_dimension?: number;
   image_format?: 'webp' | 'jpeg';

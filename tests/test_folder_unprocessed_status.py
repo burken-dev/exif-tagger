@@ -16,6 +16,7 @@ from exif_tagger.db import (
     record_user_suppression,
 )
 from exif_tagger.server import app
+from tests.conftest import TEST_API_TOKEN
 
 
 def test_get_gallery_folders_unprocessed_counts(tmp_path: Path):
@@ -245,7 +246,7 @@ def test_api_gallery_folders_response_schema(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("EXIFTAGGER_DB_FILE", str(db_file))
     monkeypatch.setattr(srv, "CONFIG_PATH", str(cfg_file))
 
-    client = TestClient(app)
+    client = TestClient(app, headers={"Authorization": f"Bearer {TEST_API_TOKEN}"})
     resp = client.get("/api/gallery/folders")
     assert resp.status_code == 200
     data = resp.json()

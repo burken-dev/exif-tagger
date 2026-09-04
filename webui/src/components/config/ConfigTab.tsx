@@ -29,6 +29,7 @@ import {
   ShieldAlert,
 } from 'lucide-react';
 import type { AppConfig, TagConfig } from '@/types';
+import { apiFetch } from '@/lib/api';
 import { AdvancedApiParams } from './AdvancedApiParams';
 
 // Keys that live in model.params but are NOT OpenAI API params (handled separately)
@@ -114,7 +115,7 @@ export const ConfigTab: React.FC = () => {
     let isSubscribed = true;
     const checkStatus = async () => {
       try {
-        const res = await fetch('/api/status');
+        const res = await apiFetch('/api/status');
         if (res.ok) {
           const data = await res.json();
           if (isSubscribed) {
@@ -191,6 +192,11 @@ export const ConfigTab: React.FC = () => {
         },
       },
     };
+
+    // Empty input means "keep the stored key" — omit it so the server preserves it.
+    if (!updatedData.model.api_key?.trim()) {
+      delete updatedData.model.api_key;
+    }
 
     const res = await saveConfig(updatedData);
     if (res.success) {
@@ -429,6 +435,11 @@ export const ConfigTab: React.FC = () => {
 
           <div className="space-y-1.5">
             <label className="text-sm font-medium text-foreground">API Key</label>
+            {config?.model?.api_key_set && (
+              <Badge variant="secondary" className="ml-2 text-xs">
+                API key configured
+              </Badge>
+            )}
             <div className="relative">
               <Input
                 type={showApiKey ? 'text' : 'password'}
@@ -439,7 +450,7 @@ export const ConfigTab: React.FC = () => {
                     model: { ...prev.model, api_key: e.target.value },
                   }))
                 }
-                placeholder="sk-..."
+                placeholder="Leave empty to keep stored key"
                 className="pr-10 font-mono text-sm"
               />
               <button

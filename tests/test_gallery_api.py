@@ -9,6 +9,7 @@ from PIL import Image as PILImage
 from exif_tagger.db import sync_gallery_index
 from exif_tagger.exif_writer import set_xptags
 from exif_tagger.server import app
+from tests.conftest import TEST_API_TOKEN
 
 
 @pytest.fixture
@@ -37,7 +38,7 @@ def gallery_setup(tmp_path, monkeypatch):
 
     monkeypatch.setattr("exif_tagger.server.CONFIG_PATH", str(tmp_path / "config.yaml"))
     with patch("exif_tagger.server.load_config", return_value=MockConfig()):
-        yield TestClient(app), db_path, gallery_dir
+        yield TestClient(app, headers={"Authorization": f"Bearer {TEST_API_TOKEN}"}), db_path, gallery_dir
 
 
 class TestGalleryAPI:

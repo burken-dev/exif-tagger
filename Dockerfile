@@ -44,8 +44,13 @@ COPY pyproject.toml .
 RUN pip install -e . --no-cache-dir && \
     mkdir -p /data/images /app/data
 
+RUN adduser -S -D -H -h /app -u 10000 appuser && \
+    chown -R appuser /app /data/images
+
 # Expose dashboard port
 EXPOSE 8080
+
+USER appuser
 
 # Run FastAPI server via uvicorn
 ENTRYPOINT ["uvicorn", "src.exif_tagger.server:app", "--host", "0.0.0.0", "--port", "8080"]

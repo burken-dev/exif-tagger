@@ -168,6 +168,8 @@ class Config(BaseModel):
     def validate_exclude_patterns(self) -> None:
         """Verify that all exclude patterns compile as valid regex."""
         for pattern in self.exclude_patterns:
+            if len(pattern) > 200:
+                raise ValueError(f"Exclude pattern too long (max 200 chars): '{pattern[:50]}...'")
             try:
                 re.compile(pattern)
             except re.error as exc:

@@ -40,6 +40,16 @@ def reset_ai_client_cache():
     clear_client_cache()
 
 
+@pytest.fixture(autouse=True)
+def reset_server_engine():
+    """Drop the cached PipelineEngine so no test reuses an engine bound to another test's CONFIG_PATH."""
+    import exif_tagger.server as server_module
+
+    server_module._engine = None
+    yield
+    server_module._engine = None
+
+
 # ---------------------------------------------------------------------------
 # Fixtures for creating temporary images
 # ---------------------------------------------------------------------------

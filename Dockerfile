@@ -27,11 +27,9 @@ FROM python:3.12-alpine AS runtime
 WORKDIR /app
 
 ENV EXIFTAGGER_DATA_DIR=/app/data
-ENV PUID=10000 PGID=10000
 
 # Install exiftool via apk (pre-built, avoids CPAN test failures)
-# su-exec drops root after entrypoint setup (see PUID/PGID handling below)
-RUN apk add --no-cache perl exiftool su-exec
+RUN apk add --no-cache perl exiftool
 
 # Copy Python dependencies from builder stage
 COPY --from=builder /install /usr/local
@@ -42,22 +40,15 @@ COPY webui/ ./webui/
 COPY --from=frontend-builder /app/webui/dist ./webui/dist
 COPY config.yaml.example ./config.yaml.example
 COPY pyproject.toml .
-COPY docker-entrypoint.sh /usr/local/bin/
-RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
 RUN pip install -e . --no-cache-dir && \
     mkdir -p /data/images /app/data
 
-RUN adduser -S -D -H -h /app -u 10000 appuser && \
-    chown -R appuser /app /data/images
-
 # Expose dashboard port
 EXPOSE 8080
 
-# Run as root through the entrypoint so it can fix mount ownership,
-# then it drops to $PUID:$PGID before starting the server.
-ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
-CMD ["uvicorn", "src.exif_tagger.server:app", "--host", "0.0.0.0", "--port", "8080"]
+# Run as root (non-root/PUID handling reverted; see #83 for revisit)
+ENTRYPOINT ["uvicorn", "src.exif_tagger.server:app", "--host", "0.0.0.0", "--port", "8080"]
 
 # Stage 4: Self-contained dev & testing target
 FROM runtime AS dev

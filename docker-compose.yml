@@ -6,9 +6,12 @@ services:
       - "8080:8080"                    # Dashboard web interface
     volumes:
       - ./data:/app/data                           # Single persistent volume for config, db, schedules
-      # NOTE: container runs as uid 10000; first run may need: sudo chown -R 10000:10000 ./data
+      # Container drops to $PUID:$PGID at startup; set these to the ids owning
+      # the gallery + ./data on the host (check with: id -u; id -g)
       - gallery:/data/images                       # Full image gallery mount
     environment:
+      PUID: "${PUID:-10000}"
+      PGID: "${PGID:-10000}"
       EXIFTAGGER_DATA_DIR: "/app/data"
       EXIFTAGGER_ROOT_DIRECTORY: "/data/images"
       EXIFTAGGER_API_TOKEN: "${EXIFTAGGER_API_TOKEN:-}"   # REQUIRED: shared bearer token for /api/* (generate: openssl rand -hex 32)

@@ -70,7 +70,10 @@ docker compose run --rm exif-tagger
 docker compose run --rm exif-tagger -v
 ```
 
-> The container runs as non-root uid 10000; first run may need `sudo chown -R 10000:10000 ./data`.
+> The container drops to `$PUID:$PGID` (default 10000:10000) at startup. If your
+> gallery is owned by your host user, export matching ids first:
+> `export PUID="$(id -u)" PGID="$(id -g)"` — otherwise you'll get readonly-database
+> or permission errors on startup.
 
 ### 2. Local Python (development)
 

@@ -12,6 +12,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useToast } from '@/components/layout/ToastContainer';
 import type { GalleryImage } from '@/types';
+import { getImageUrl } from '@/lib/api';
 
 interface ImageDetailModalProps {
   image: GalleryImage | null;
@@ -152,7 +153,7 @@ export const ImageDetailModal: React.FC<ImageDetailModalProps> = ({
           {/* Left: Image Preview (2 Columns on MD) */}
           <div className="md:col-span-2 flex flex-col items-center justify-center bg-black/40 rounded-lg p-2 min-h-[300px] border border-border">
             <img
-              src={`/api/gallery/image/file?path=${encodeURIComponent(image.relative_path)}`}
+              src={getImageUrl(`/api/gallery/image/file?path=${encodeURIComponent(image.relative_path)}`)}
               alt={image.filename}
               className="max-h-[60vh] w-auto max-w-full object-contain rounded"
             />

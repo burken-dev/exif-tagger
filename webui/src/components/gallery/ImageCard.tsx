@@ -1,6 +1,7 @@
 import React from 'react';
 import { CheckSquare, Square, Tag as TagIcon } from 'lucide-react';
 import type { GalleryImage } from '@/types';
+import { getImageUrl } from '@/lib/api';
 
 interface ImageCardProps {
   image: GalleryImage;
@@ -62,8 +63,8 @@ export const ImageCard: React.FC<ImageCardProps> = ({
         <img
           src={
             image.id !== null
-              ? `/api/gallery/image/${image.id}/file`
-              : `/api/gallery/image/file?path=${encodeURIComponent(image.relative_path)}`
+              ? getImageUrl(`/api/gallery/image/${image.id}/file`)
+              : getImageUrl(`/api/gallery/image/file?path=${encodeURIComponent(image.relative_path)}`)
           }
           alt={image.filename}
           loading="lazy"

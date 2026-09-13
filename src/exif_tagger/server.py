@@ -43,15 +43,28 @@ def _expected_api_token() -> str:
     return os.environ.get("EXIFTAGGER_API_TOKEN", "")
 
 
+def _extract_request_token(request: Request) -> str:
+    auth = request.headers.get("authorization", "")
+    scheme, _, token = auth.partition(" ")
+    if scheme.lower() == "bearer" and token:
+        return token
+    query_token = request.query_params.get("token")
+    if query_token:
+        return query_token
+    cookie_token = request.cookies.get("exif_tagger_token")
+    if cookie_token:
+        return cookie_token
+    return ""
+
+
 @app.middleware("http")
 async def api_token_middleware(request: Request, call_next):
     if request.url.path.startswith("/api/") or request.url.path in ("/docs", "/redoc", "/openapi.json"):
         expected = _expected_api_token()
         if not expected:
             return JSONResponse(status_code=503, content={"detail": "Server API token is not configured"})
-        auth = request.headers.get("authorization", "")
-        scheme, _, token = auth.partition(" ")
-        if scheme.lower() != "bearer" or not secrets.compare_digest(token, expected):
+        token = _extract_request_token(request)
+        if not token or not secrets.compare_digest(token, expected):
             return JSONResponse(status_code=401, content={"detail": "Invalid or missing API token"})
     return await call_next(request)
 

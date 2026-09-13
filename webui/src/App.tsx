@@ -67,7 +67,16 @@ export function AppContent() {
       <Header />
       <Navigation activeTab={activeTab} onTabChange={handleTabChange} />
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
-        {renderTabContent()}
+        {!getApiToken() ? (
+          <div className="flex flex-col items-center justify-center min-h-[50vh] text-center p-8 space-y-3">
+            <h2 className="text-xl font-semibold text-foreground">API Token Required</h2>
+            <p className="text-sm text-muted-foreground max-w-md">
+              Please enter your server API token to access the dashboard.
+            </p>
+          </div>
+        ) : (
+          renderTabContent()
+        )}
       </main>
       <ApiTokenPrompt open={tokenPromptOpen} />
     </div>

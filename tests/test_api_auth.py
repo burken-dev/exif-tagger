@@ -31,6 +31,30 @@ def test_api_valid_token(monkeypatch):
     assert resp.status_code == 200
 
 
+def test_api_valid_token_query_param(monkeypatch):
+    monkeypatch.setenv("EXIFTAGGER_API_TOKEN", TOKEN)
+    resp = _client().get(f"/api/status?token={TOKEN}")
+    assert resp.status_code == 200
+
+
+def test_api_wrong_token_query_param(monkeypatch):
+    monkeypatch.setenv("EXIFTAGGER_API_TOKEN", TOKEN)
+    resp = _client().get("/api/status?token=wrong")
+    assert resp.status_code == 401
+
+
+def test_api_valid_token_cookie(monkeypatch):
+    monkeypatch.setenv("EXIFTAGGER_API_TOKEN", TOKEN)
+    resp = _client().get("/api/status", cookies={"exif_tagger_token": TOKEN})
+    assert resp.status_code == 200
+
+
+def test_api_wrong_token_cookie(monkeypatch):
+    monkeypatch.setenv("EXIFTAGGER_API_TOKEN", TOKEN)
+    resp = _client().get("/api/status", cookies={"exif_tagger_token": "wrong"})
+    assert resp.status_code == 401
+
+
 def test_api_misconfigured_server(monkeypatch):
     monkeypatch.delenv("EXIFTAGGER_API_TOKEN", raising=False)
     resp = _client().get("/api/status", headers={"Authorization": "Bearer anything"})
